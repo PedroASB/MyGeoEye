@@ -161,5 +161,20 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# JPEG
+*.jpg
+*.jpeg
+*.jpe
+*.jif
+*.jfif
+*.jfi
+
+# PNG
+*.png
+
+# Tagged Image File Format
+*.tiff
+*.tif
+
 # Other
 .vscode/

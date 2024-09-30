@@ -14,7 +14,6 @@ def save_image(connection, directory):
     image_name = deserialize_string(connection)
     image_size = deserialize_int(connection)
     image_path = os.path.join(directory, image_name)
-    print(f'image_name = {image_name}, image_size = {image_size}, image_path = {image_path}')
     with open(image_path, 'wb') as file:
         received_size = 0
         while received_size < image_size:
