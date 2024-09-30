@@ -3,9 +3,9 @@ import threading
 import os
 from serialization import *
 
-PORT = 5052
 HOST_NAME = socket.gethostname()
 SERVER_IP = socket.gethostbyname(HOST_NAME)
+PORT = 5050
 ADDRESS = (SERVER_IP, PORT)
 IMAGES_DIR = 'images_database'
 
@@ -32,6 +32,32 @@ def list_images(connection, directory):
         serialize_string(connection, '\n'.join(images))
 
 
+def send_image(connection, directory):
+    """Envia uma imagem para o cliente"""
+    image_name = deserialize_string(connection)
+    image_path = os.path.join(directory, image_name)
+    if not os.path.exists(image_path):
+        serialize_bool(connection, False)
+        return
+    serialize_bool(connection, True)
+    image_size = os.path.getsize(image_path)
+    serialize_int(connection, image_size)
+    with open(image_path, 'rb') as file:
+        while chunk := file.read(CHUNK_SIZE):
+            connection.send(chunk)
+
+
+def delete_image(connection, directory):
+    """Deleta uma imagem"""
+    image_name = deserialize_string(connection)
+    image_path = os.path.join(directory, image_name)
+    if not os.path.exists(image_path):
+        serialize_bool(connection, False)
+        return
+    serialize_bool(connection, True)
+    os.remove(image_path)
+
+
 def handle_client(connection, address):
     """Gerencia a conexão com um cliente"""
     print(f'[NOVA CONEXÃO] Cliente {address[0]}:{address[1]} conectado.')
@@ -44,7 +70,7 @@ def handle_client(connection, address):
                 
             case 2: # Baixar imagem
                 print(f'[COMANDO] {address[0]}:{address[1]}: Baixar imagem.')
-                print('<Imagem enviada para o cliente>')
+                send_image(connection, IMAGES_DIR)
 
             case 3: # Listar imagens
                 print(f'[COMANDO] {address[0]}:{address[1]}: Listar imagens.')
@@ -52,14 +78,15 @@ def handle_client(connection, address):
                     
             case 4: # Deletar imagem
                 print(f'[COMANDO] {address[0]}:{address[1]}: Deletar imagem.')
-                print('<Imagem deletada>')
+                delete_image(connection, IMAGES_DIR)
 
-            case 0: # Finalizar
-                print(f'[COMANDO] {address[0]}:{address[1]}: Finalizar.')
+            case 0: # Encerrar conexão
+                print(f'[COMANDO] {address[0]}:{address[1]}: Encerrar conexão.')
                 break
             
             case _:
-                pass
+                print(f'[ERRO] {address[0]}:{address[1]}: <comando inválido>')
+
     connection.close()
     print(f'[CONEXÃO ENCERRADA] Cliente {address[0]}:{address[1]} desconectado.')
 

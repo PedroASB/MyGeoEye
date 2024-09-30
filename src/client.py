@@ -5,21 +5,38 @@ from serialization import *
 FORMAT = 'utf-8'
 HOST_NAME = socket.gethostname()
 SERVER_IP = socket.gethostbyname(HOST_NAME)
-PORT = 5052
+PORT = 5050
 ADDRESS = (SERVER_IP, PORT)
+IMAGES_DIR = 'client_images'
 
-def send_image(client_socket, image_name):
+def upload_image(client_socket, directory, image_name):
     """Envia uma imagem para o servidor"""
-    if not os.path.exists(image_name):
-        print('\n[ERRO] Arquivo de imagem não encontrado.')
-        return
     serialize_string(client_socket, image_name)
-    image_size = os.path.getsize(image_name)
+    image_path = os.path.join(directory, image_name)
+    image_size = os.path.getsize(image_path)
     serialize_int(client_socket, image_size)
-    with open(image_name, 'rb') as file:
+    with open(image_path, 'rb') as file:
         while chunk := file.read(CHUNK_SIZE):
             client_socket.send(chunk)
-    print('Imagem enviada com sucesso.')
+    print(f'\nImagem "{image_name}" enviada com sucesso.')
+
+
+def download_image(client_socket, directory, image_name):
+    """Baixa uma imagem do servidor"""
+    serialize_string(client_socket, image_name)
+    has_image = deserialize_bool(client_socket)
+    if not has_image:
+        print('\n[ERRO] Arquivo de imagem não encontrado.')
+        return
+    image_size = deserialize_int(client_socket)
+    image_path = os.path.join(directory, image_name)
+    with open(image_path, 'wb') as file:
+        received_size = 0
+        while received_size < image_size:
+            data = client_socket.recv(CHUNK_SIZE)
+            file.write(data)
+            received_size += len(data)
+    print(f'Imagem "{image_name}" armazenada com sucesso em "{directory}/".')
 
 
 def list_images(client_socket):
@@ -30,6 +47,16 @@ def list_images(client_socket):
         print('\nImagens armazenadas:\n' + images)
     else:
         print('\nNenhuma imagem armazenada.')
+
+
+def delete_image(client_socket, image_name):
+    """Deleta uma imagem"""
+    serialize_string(client_socket, image_name)
+    has_image = deserialize_bool(client_socket)
+    if has_image:
+        print(f'\nImagem "{image_name}" deletada com sucesso.')
+    else:
+        print('\n[ERRO] Arquivo de imagem não encontrado.')
 
 
 def start_client():
@@ -44,7 +71,6 @@ def start_client():
 
     while True:
         print('\nSelecione um comando:')
-        # TODO: Enviar/baixar/deletar vários de uma vez
         print('1 - Enviar imagem')
         print('2 - Baixar imagem')
         print('3 - Listar imagens')
@@ -54,12 +80,17 @@ def start_client():
         match command:
             case '1': # Inserir imagem
                 image_name = str(input('\nImagem a ser enviada: '))
+                image_path = os.path.join(IMAGES_DIR, image_name)
+                if not os.path.exists(image_path):
+                    print('\n[ERRO] Arquivo de imagem não encontrado.')
+                    continue
                 serialize_int(client_socket, 1)
-                send_image(client_socket, image_name)
+                upload_image(client_socket, IMAGES_DIR, image_name)
 
             case '2': # Baixar imagem
                 serialize_int(client_socket, 2)
-                print('\n<Imagens baixadas>')
+                image_name = str(input('\nImagem a ser baixada: '))
+                download_image(client_socket, IMAGES_DIR, image_name)
 
             case '3': # Listar imagens
                 serialize_int(client_socket, 3)
@@ -67,9 +98,10 @@ def start_client():
 
             case '4': # Deletar imagem
                 serialize_int(client_socket, 4)
-                print('\n<Imagem deletada>')
+                image_name = str(input('\nImagem a ser deletada: '))
+                delete_image(client_socket, image_name)
 
-            case '0':
+            case '0': # Encerrar conexão
                 serialize_int(client_socket, 0)
                 break
 

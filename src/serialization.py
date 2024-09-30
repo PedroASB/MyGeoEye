@@ -18,6 +18,10 @@ def serialize_string(connection, string):
     serialize_int(connection, len(string))
     connection.send(string.encode(FORMAT))
 
+def serialize_bool(connection, boolean):
+    """Serializa e envia um valor booleano"""
+    connection.send(pack('!?', boolean))
+
 def deserialize_int(connection):
     """Deserializa e retorna um número do tipo int"""
     return unpack('!I', connection.recv(SIZE_OF_INT))[0]
@@ -31,3 +35,6 @@ def deserialize_string(connection):
     string_lenght = deserialize_int(connection)
     return connection.recv(string_lenght).decode(FORMAT)
 
+def deserialize_bool(connection):
+    """Deserializa e retorna um valor booleano"""
+    return unpack('!?', connection.recv(1))[0]
