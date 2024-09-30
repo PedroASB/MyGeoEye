@@ -5,10 +5,35 @@ from serialization import *
 FORMAT = 'utf-8'
 HOST_NAME = socket.gethostname()
 SERVER_IP = socket.gethostbyname(HOST_NAME)
-PORT = 5050
+PORT = 5052
 ADDRESS = (SERVER_IP, PORT)
 
+def send_image(client_socket, image_name):
+    """Envia uma imagem para o servidor"""
+    if not os.path.exists(image_name):
+        print('\n[ERRO] Arquivo de imagem não encontrado.')
+        return
+    serialize_string(client_socket, image_name)
+    image_size = os.path.getsize(image_name)
+    serialize_int(client_socket, image_size)
+    with open(image_name, 'rb') as file:
+        while chunk := file.read(CHUNK_SIZE):
+            client_socket.send(chunk)
+    print('Imagem enviada com sucesso.')
+
+
+def list_images(client_socket):
+    """Lista as imagens que já foram salvas"""
+    num_images = deserialize_int(client_socket)
+    if num_images > 0:
+        images = deserialize_string(client_socket)
+        print('\nImagens armazenadas:\n' + images)
+    else:
+        print('\nNenhuma imagem armazenada.')
+
+
 def start_client():
+    """Inicializa o cliente"""
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         client_socket.connect(ADDRESS)
@@ -28,8 +53,9 @@ def start_client():
         command = input('>> ')
         match command:
             case '1': # Inserir imagem
+                image_name = str(input('\nImagem a ser enviada: '))
                 serialize_int(client_socket, 1)
-                print('\n<Imagem inserida>')
+                send_image(client_socket, image_name)
 
             case '2': # Baixar imagem
                 serialize_int(client_socket, 2)
@@ -37,10 +63,10 @@ def start_client():
 
             case '3': # Listar imagens
                 serialize_int(client_socket, 3)
-                print('\n<Imagens listadas>')
+                list_images(client_socket)
 
             case '4': # Deletar imagem
-                serialize_int(client_socket, 3)
+                serialize_int(client_socket, 4)
                 print('\n<Imagem deletada>')
 
             case '0':
