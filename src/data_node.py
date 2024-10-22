@@ -112,10 +112,10 @@ class DataNode:
         while True:
             # TODO: confirmar connection e address
             connection, address = self.server_socket.accept()
-            # self.handle_server(connection, address)
-            thread = threading.Thread(target=self.handle_server, args=(connection, address))
-            thread.start()
-            print(f'Conexões ativas: {threading.active_count() - 1}')
+            self.handle_server(connection, address)
+            # thread = threading.Thread(target=self.handle_server, args=(connection, address))
+            # thread.start()
+            # print(f'Conexões ativas: {threading.active_count() - 1}')
 
 
 if __name__ == "__main__":

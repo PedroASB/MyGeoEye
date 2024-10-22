@@ -57,7 +57,6 @@ class Server:
             self.cluster_socket.close()  # Fecha a conexão
             self.cluster_socket = None  # Define como None para tentar reconectar
 
-    # FEITO
     def save_image(self, connection):
         """Armazena a imagem"""
         image_name = deserialize_string(connection)
@@ -75,7 +74,6 @@ class Server:
         print(f'\nImagem "{image_name}" enviada com sucesso.')
 
 
-    # FEITO
     def list_images(self, connection):
         """Lista todas as imagens que o cliente salvou"""
         num_images = deserialize_int(self.cluster_socket)
@@ -86,30 +84,33 @@ class Server:
 
 
     def send_image(self, connection):
-        pass
-        # """Envia uma imagem para o cliente"""
-        # image_name = deserialize_string(connection)
-        # image_path = os.path.join(directory, image_name)
-        # if not os.path.exists(image_path):
-        #     serialize_bool(connection, False)
-        #     return
-        # serialize_bool(connection, True)
-        # image_size = os.path.getsize(image_path)
-        # serialize_int(connection, image_size)
-        # with open(image_path, 'rb') as file:
-        #     while chunk := file.read(CHUNK_SIZE):
-        #         connection.send(chunk)
+        """Envia uma imagem para o cliente"""
+        image_name = deserialize_string(connection)
+        serialize_string(self.cluster_socket, image_name)
+        has_image = deserialize_bool(self.cluster_socket)
+        serialize_bool(connection, has_image)
+        
+        if not has_image:
+            return
+        
+        image_size = deserialize_int(self.cluster_socket)
+        serialize_int(connection, image_size)
+
+        received_size = 0
+        while received_size < image_size:
+            # TODO: criar função serialize/deserialze para chunks
+            chunk = self.cluster_socket.recv(CHUNK_SIZE)
+            connection.send(chunk)
+            received_size += len(chunk)
+                
 
     def delete_image(self, connection):
-        pass
-        # """Deleta uma imagem"""
-        # image_name = deserialize_string(connection)
-        # image_path = os.path.join(directory, image_name)
-        # if not os.path.exists(image_path):
-        #     serialize_bool(connection, False)
-        #     return
-        # serialize_bool(connection, True)
-        # os.remove(image_path)
+        """Deleta uma imagem"""
+        image_name = deserialize_string(connection)
+        serialize_string(self.cluster_socket, image_name)
+
+        has_image = deserialize_bool(self.cluster_socket)
+        serialize_bool(connection, has_image)
 
 
     def handle_client(self, connection, address):
