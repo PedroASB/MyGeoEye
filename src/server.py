@@ -1,6 +1,7 @@
 import socket
 import threading
 import os
+import time
 from serialization import *
 
 HOST_NAME = socket.gethostname()
@@ -21,78 +22,121 @@ class Server:
         self.cluster_port = cluster_port
         if not os.path.exists(self.IMAGES_DIR):
             os.makedirs(self.IMAGES_DIR)
-        
+        self.client_socket = None
+        self.cluster_socket = None
+        self.connect_cluster()
 
-    def save_image(self, connection, directory):
+
+    def connect_cluster(self):
+        """Tenta conectar ao cluster com reconexões automáticas."""
+        while self.cluster_socket is None:
+            try:
+                print(f"[STATUS] Tentando conectar ao cluster em {self.cluster_ip}:{self.cluster_port}...")
+                # Cria um socket e tenta conectar ao cluster
+                self.cluster_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.cluster_socket.connect((self.cluster_ip, self.cluster_port))
+                print(f"[STATUS] Conexão com o cluster estabelecida")
+            except ConnectionRefusedError:
+                # Caso a conexão falhe, espera 5 segundos e tenta novamente
+                print(f"[STATUS] Conexão recusada. Tentando novamente em 5 segundos...")
+                self.cluster_socket = None
+                time.sleep(5)
+
+
+    def reconect_cluster(self):
+        """Tenta reconectar ao cluster caso a conexão caia."""
+        print("[STATUS] Tentando reconectar ao cluster...")
+        self.disconnect_cluster()  # Desconecta o socket atual
+        self.connect_cluster()  # Tenta se conectar novamente
+
+
+    def disconnect_cluster(self):
+        """Desconecta do cluster."""
+        if self.cluster_socket:
+            print("[STATUS] Desconectando do cluster")
+            self.cluster_socket.close()  # Fecha a conexão
+            self.cluster_socket = None  # Define como None para tentar reconectar
+
+    # FEITO
+    def save_image(self, connection):
         """Armazena a imagem"""
         image_name = deserialize_string(connection)
         image_size = deserialize_int(connection)
-        image_path = os.path.join(directory, image_name)
-        with open(image_path, 'wb') as file:
-            received_size = 0
-            while received_size < image_size:
-                data = connection.recv(CHUNK_SIZE)
-                file.write(data)
-                received_size += len(data)
-        print(f'Imagem "{image_name}" armazenada com sucesso.')
+
+        serialize_string(self.cluster_socket, image_name)
+        serialize_int(self.cluster_socket, image_size)
+        
+        received_size = 0
+        while received_size < image_size:
+            chunk = connection.recv(CHUNK_SIZE)
+            self.cluster_socket.send(chunk)
+            received_size += len(chunk)
+
+        print(f'\nImagem "{image_name}" enviada com sucesso.')
 
 
-    def list_images(self, connection, directory):
+    # FEITO
+    def list_images(self, connection):
         """Lista todas as imagens que o cliente salvou"""
-        images = os.listdir(directory)
-        num_images = len(images)
+        num_images = deserialize_int(self.cluster_socket)
         serialize_int(connection, num_images)
         if num_images > 0:
-            serialize_string(connection, '\n'.join(images))
+            images_list = deserialize_string(self.cluster_socket)
+            serialize_string(connection, images_list)
 
 
-    def send_image(self, connection, directory):
-        """Envia uma imagem para o cliente"""
-        image_name = deserialize_string(connection)
-        image_path = os.path.join(directory, image_name)
-        if not os.path.exists(image_path):
-            serialize_bool(connection, False)
-            return
-        serialize_bool(connection, True)
-        image_size = os.path.getsize(image_path)
-        serialize_int(connection, image_size)
-        with open(image_path, 'rb') as file:
-            while chunk := file.read(CHUNK_SIZE):
-                connection.send(chunk)
+    def send_image(self, connection):
+        pass
+        # """Envia uma imagem para o cliente"""
+        # image_name = deserialize_string(connection)
+        # image_path = os.path.join(directory, image_name)
+        # if not os.path.exists(image_path):
+        #     serialize_bool(connection, False)
+        #     return
+        # serialize_bool(connection, True)
+        # image_size = os.path.getsize(image_path)
+        # serialize_int(connection, image_size)
+        # with open(image_path, 'rb') as file:
+        #     while chunk := file.read(CHUNK_SIZE):
+        #         connection.send(chunk)
 
-
-    def delete_image(self, connection, directory):
-        """Deleta uma imagem"""
-        image_name = deserialize_string(connection)
-        image_path = os.path.join(directory, image_name)
-        if not os.path.exists(image_path):
-            serialize_bool(connection, False)
-            return
-        serialize_bool(connection, True)
-        os.remove(image_path)
+    def delete_image(self, connection):
+        pass
+        # """Deleta uma imagem"""
+        # image_name = deserialize_string(connection)
+        # image_path = os.path.join(directory, image_name)
+        # if not os.path.exists(image_path):
+        #     serialize_bool(connection, False)
+        #     return
+        # serialize_bool(connection, True)
+        # os.remove(image_path)
 
 
     def handle_client(self, connection, address):
-        """Gerencia a conexão com um cliente"""
+        """Gerencia a conexão com um server"""
         print(f'[NOVA CONEXÃO] Cliente {address[0]}:{address[1]} conectado.')
         while True:
             option = deserialize_int(connection)
             match option:
                 case 1: # Inserir imagem
                     print(f'[COMANDO] {address[0]}:{address[1]}: Inserir imagem.')
-                    self.save_image(connection, self.IMAGES_DIR)
+                    serialize_int(self.cluster_socket, 1)
+                    self.save_image(connection)
                     
                 case 2: # Baixar imagem
                     print(f'[COMANDO] {address[0]}:{address[1]}: Baixar imagem.')
-                    self.send_image(connection, self.IMAGES_DIR)
+                    serialize_int(self.cluster_socket, 2)
+                    self.send_image(connection)
 
                 case 3: # Listar imagens
                     print(f'[COMANDO] {address[0]}:{address[1]}: Listar imagens.')
-                    self.list_images(connection, self.IMAGES_DIR)
+                    serialize_int(self.cluster_socket, 3)
+                    self.list_images(connection)
                         
                 case 4: # Deletar imagem
                     print(f'[COMANDO] {address[0]}:{address[1]}: Deletar imagem.')
-                    self.delete_image(connection, self.IMAGES_DIR)
+                    serialize_int(self.cluster_socket, 4)
+                    self.delete_image(connection)
 
                 case 0: # Encerrar conexão
                     print(f'[COMANDO] {address[0]}:{address[1]}: Encerrar conexão.')
@@ -107,12 +151,12 @@ class Server:
 
     def start(self):
         """Inicializa o servidor"""
-        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_socket.bind(self.address)
-        server_socket.listen()
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.client_socket.bind(self.address)
+        self.client_socket.listen()
         print(f'[STATUS] Servidor iniciado em {IP_SERVER}:{PORT_SERVER}.')
         while True:
-            connection, address = server_socket.accept()
+            connection, address = self.client_socket.accept()
             thread = threading.Thread(target=self.handle_client, args=(connection, address))
             thread.start()
             print(f'Conexões ativas: {threading.active_count() - 1}')
