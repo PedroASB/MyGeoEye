@@ -93,7 +93,7 @@ class Client:
                     image_name = str(input('\nImagem a ser enviada: '))
                     image_path = os.path.join(self.IMAGES_DIR, image_name)
                     if not os.path.exists(image_path):
-                        print('\n[ERRO] Arquivo de imagem não encontrado.')
+                        print(f'\n[ERRO] Arquivo de imagem "{image_name}" não encontrado.')
                         continue
                     serialize_int(self.server_socket, 1)
                     self.upload_image(self.IMAGES_DIR, image_name)

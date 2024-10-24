@@ -4,10 +4,10 @@ from serialization import *
 
 HOST_NAME = socket.gethostname()
 IP_DATA_NODE = socket.gethostbyname(HOST_NAME)
-PORT_DATA_NODE = 6000
+PORT_DATA_NODE = 8002
 
 class DataNode:
-    IMAGES_DIR = 'database'
+    IMAGES_DIR = 'database2'
 
     def __init__(self, ip=IP_DATA_NODE, port=PORT_DATA_NODE):
         # Se o diretório de imagens não existir, ele será criado
@@ -26,6 +26,11 @@ class DataNode:
         image_name = deserialize_string(connection)
         image_size = deserialize_int(connection)
         image_path = os.path.join(directory, image_name)
+
+        print('image_name =', image_name)
+        print('image_size =', image_size)
+        print('image_path =', image_path)
+
         with open(image_path, 'wb') as file:
             received_size = 0
             while received_size < image_size:
