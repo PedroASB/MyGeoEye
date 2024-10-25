@@ -17,7 +17,6 @@ class Server:
     CLUSTER_SIZE = len(CLUSTER) # Total de data nodes
     REPLICATION_FACTOR = 2 # Fator de réplica
     # DATA_NODE_ID = {f'data_node_{i+1}': CLUSTER[i] for i in range(CLUSTER_SIZE)}
-    data_node_id = None
 
     def __init__(self, ip=IP_SERVER, port=PORT_SERVER):
         self.ip = ip
@@ -97,23 +96,46 @@ class Server:
         self.index_img_table[image_name][0].append(node_id)
     
 
-    def save_image(self, connection, node_id):
+    def save_image(self, connection):
         """Armazena a imagem"""
-        # image_name = deserialize_string(connection)
-        # image_size = deserialize_int(connection)
+        image_name = deserialize_string(connection)
+        image_size = deserialize_int(connection)
 
         # MEMÓRIA RAM
         # img_01  ->  [[3 4], 1]
-        self.update_index_img_table(image_name, node_id)
-        data_node_socket = self.data_node_id[node_id][1]
+        selected_nodes = self.select_data_nodes_insert()
 
-        serialize_string(data_node_socket, image_name)
-        serialize_int(data_node_socket, image_size)
+        print('Selected data nodes:')
+        print(selected_nodes)
+
+        for node_id in selected_nodes:
+            data_node_socket = self.data_node_id[node_id][1]
+            self.update_index_img_table(image_name, node_id)
+            serialize_int(data_node_socket, 1)
+            serialize_string(data_node_socket, image_name)
+            serialize_int(data_node_socket, image_size)
         
+        print('self.index_img_table:', self.index_img_table)
+        print('==============')
+
+        # Função para enviar um chunk para todos os data nodes simultaneamente
+        # TODO: o que fazer se a imagem já existe no diretório?
+        def send_chunk_to_all_nodes(chunk):
+            for node_id in selected_nodes:
+                data_node_socket = self.data_node_id[node_id][1]
+                try:
+                    data_node_socket.sendall(chunk)  # Envia o chunk para o data node
+                except Exception as e:
+                    print(f"Erro ao enviar para o nó {node_id}: {e}")
+
+        # Recebe a imagem do cliente em chunks e envia para os data nodes
         received_size = 0
         while received_size < image_size:
             chunk = connection.recv(CHUNK_SIZE)
-            data_node_socket.send(chunk)
+            if not chunk:
+                break
+            # Envia o chunk para todos os nós selecionados
+            send_chunk_to_all_nodes(chunk)
             received_size += len(chunk)
 
         print(f'\nImagem "{image_name}" armazenada com sucesso.')
@@ -143,7 +165,6 @@ class Server:
 
         received_size = 0
         while received_size < image_size:
-            # TODO: criar função serialize/deserialze para chunks
             chunk = self.data_node_socket.recv(CHUNK_SIZE)
             connection.send(chunk)
             received_size += len(chunk)
@@ -182,16 +203,8 @@ class Server:
             match option:
                 case 1: # Inserir imagem
                     print(f'[COMANDO] {address[0]}:{address[1]}: Inserir imagem.')
-                    image_name = deserialize_string(connection)
-                    image_size = deserialize_int(connection)
-                    selected_nodes = self.select_data_nodes_insert()
-                    for node_id in selected_nodes:
-                        # [(ip, port), socket]
-                        # 0: (ip, port)
-                        # 1: socket
-                        data_node_socket = self.data_node_id[node_id][1]
-                        serialize_int(data_node_socket, 1)
-                        self.save_image(connection, node_id, image_name, image_size) # save_image(conn, socket)
+                    self.save_image(connection) # save_image(conn, socket)
+
                     
                 case 2: # Baixar imagem
                     print(f'[COMANDO] {address[0]}:{address[1]}: Baixar imagem.')
