@@ -1,6 +1,5 @@
 import socket
 import threading
-import os
 import time
 from serialization import *
 from addresses import *
@@ -27,7 +26,7 @@ class Server:
         self.client_socket = None
         self.data_node_id = {f'data_node_{i+1}': [self.CLUSTER[i], None] for i in range(self.CLUSTER_SIZE)}
         self.connect_cluster()
-        self.data_node_socket = None # remover
+        # self.data_node_socket = None # remover
         self.current_node_insert = 1
         self.current_node_recover = 1
         self.index_img_table = {}
@@ -74,18 +73,19 @@ class Server:
 
     def select_data_node_recover(self, image_name):
         # MEMÓRIA RAM
-        # img_01  ->  [[2 3], 3]
-        # img_02  ->  [[4 5], 5]
-        # img_03  ->  [[1 2], 1]
+        # img_01  ->  [[2 3 4], 2]
+        # img_02  ->  [[4 5 6], 1]
+        # img_03  ->  [[1 2 3], 1]
 
-        # img_01  ->  [[5 6 7 8], 1]
-        # 0: [2 3 4 5]
-        # 1: 3
-        selected_node = self.index_img_table[image_name][1]
+        # image_name: img_01  ->  [[5 6 7 8], 1]
+        index = self.index_img_table[image_name][1] - 1
+        selected_node_id = self.index_img_table[image_name][0][index]
+
         self.index_img_table[image_name][1] += 1
-        if self.current_node_insert > self.REPLICATION_FACTOR:
-                self.current_node_insert = 1
-        return selected_node
+        if self.index_img_table[image_name][1] > self.REPLICATION_FACTOR:
+            self.index_img_table[image_name][1] = 1
+        
+        return selected_node_id
 
 
     def update_index_img_table(self, image_name, node_id):
@@ -96,7 +96,7 @@ class Server:
         self.index_img_table[image_name][0].append(node_id)
     
 
-    def save_image(self, connection):
+    def store_image(self, connection):
         """Armazena a imagem"""
         image_name = deserialize_string(connection)
         image_size = deserialize_int(connection)
@@ -111,7 +111,7 @@ class Server:
         for node_id in selected_nodes:
             data_node_socket = self.data_node_id[node_id][1]
             self.update_index_img_table(image_name, node_id)
-            serialize_int(data_node_socket, 1)
+            serialize_int(data_node_socket, 1) # TODO: trocar por CMD_STORE = 1
             serialize_string(data_node_socket, image_name)
             serialize_int(data_node_socket, image_size)
         
@@ -143,29 +143,42 @@ class Server:
 
     def list_images(self, connection):
         """Lista todas as imagens que o cliente salvou"""
-        num_images = deserialize_int(self.data_node_socket)
+        num_images = len(self.index_img_table)
         serialize_int(connection, num_images)
-        if num_images > 0:
-            images_list = deserialize_string(self.data_node_socket)
-            serialize_string(connection, images_list)
+        for image_name in self.index_img_table:
+            serialize_string(connection, image_name)
 
 
     def send_image(self, connection):
         """Envia uma imagem para o cliente"""
+        # Recebendo o nome da imagem do cliente
         image_name = deserialize_string(connection)
-        serialize_string(self.data_node_socket, image_name)
-        has_image = deserialize_bool(self.data_node_socket)
+
+        # Verifica se existe a imagem
+        if image_name in self.index_img_table:
+            has_image = True
+        else:
+            has_image = False
+        # Envia se há uma imagem ou não para o cliente
         serialize_bool(connection, has_image)
-        
         if not has_image:
             return
         
-        image_size = deserialize_int(self.data_node_socket)
+        # Selecionado o data node para realizar o upload
+        node_id = self.select_data_node_recover(image_name)
+        data_node_socket = self.data_node_id[node_id][1]
+
+        print('Data node selecionado p/ download:', node_id)
+        
+        serialize_int(data_node_socket, 2)
+        serialize_string(data_node_socket, image_name)
+        
+        image_size = deserialize_int(data_node_socket)
         serialize_int(connection, image_size)
 
         received_size = 0
         while received_size < image_size:
-            chunk = self.data_node_socket.recv(CHUNK_SIZE)
+            chunk = data_node_socket.recv(CHUNK_SIZE)
             connection.send(chunk)
             received_size += len(chunk)
                 
@@ -173,9 +186,19 @@ class Server:
     def delete_image(self, connection):
         """Deleta uma imagem"""
         image_name = deserialize_string(connection)
-        serialize_string(self.data_node_socket, image_name)
 
-        has_image = deserialize_bool(self.data_node_socket)
+        # has_image = deserialize_bool(data_node_socket)
+        if image_name in self.index_img_table:
+            has_image = True
+            # img_01  ->  [[3 4], 1]
+            for node_id in self.index_img_table[image_name][0]:
+                data_node_socket = self.data_node_id[node_id][1] # 3 4
+                serialize_int(data_node_socket, 4)
+                serialize_string(data_node_socket, image_name)
+            del self.index_img_table[image_name]
+        else:
+            has_image = False
+
         serialize_bool(connection, has_image)
 
 
@@ -189,10 +212,10 @@ class Server:
     # def disconnect_data_node(self, address):
     #     """Desconecta do cluster."""
     #     data_node_socket = data_node_id[key]
-    #     if self.data_node_socket:
+    #     if data_node_socket:
     #         print("[STATUS] Desconectando do cluster")
-    #         self.data_node_socket.close()  # Fecha a conexão
-    #         self.data_node_socket = None  # Define como None para tentar reconectar
+    #         data_node_socket.close()  # Fecha a conexão
+    #         data_node_socket = None  # Define como None para tentar reconectar
 
 
     def handle_client(self, connection, address):
@@ -203,22 +226,18 @@ class Server:
             match option:
                 case 1: # Inserir imagem
                     print(f'[COMANDO] {address[0]}:{address[1]}: Inserir imagem.')
-                    self.save_image(connection) # save_image(conn, socket)
-
+                    self.store_image(connection) # save_image(conn, socket)
                     
                 case 2: # Baixar imagem
                     print(f'[COMANDO] {address[0]}:{address[1]}: Baixar imagem.')
-                    serialize_int(self.data_node_socket, 2)
                     self.send_image(connection)
 
                 case 3: # Listar imagens
                     print(f'[COMANDO] {address[0]}:{address[1]}: Listar imagens.')
-                    serialize_int(self.data_node_socket, 3)
                     self.list_images(connection)
                         
                 case 4: # Deletar imagem
                     print(f'[COMANDO] {address[0]}:{address[1]}: Deletar imagem.')
-                    serialize_int(self.data_node_socket, 4)
                     self.delete_image(connection)
 
                 case 0: # Encerrar conexão

@@ -40,23 +40,24 @@ class DataNode:
         print(f'Imagem "{image_name}" armazenada com sucesso.')
 
 
-    def list_images(self, connection, directory):
-        """Lista todas as imagens que o cliente salvou"""
-        images = os.listdir(directory)
-        num_images = len(images)
-        serialize_int(connection, num_images)
-        if num_images > 0:
-            serialize_string(connection, '\n'.join(images))
+    # def list_images(self, connection, directory):
+    #     """Lista todas as imagens que o cliente salvou"""
+    #     images = os.listdir(directory)
+    #     num_images = len(images)
+    #     serialize_int(connection, num_images)
+    #     if num_images > 0:
+    #         serialize_string(connection, '\n'.join(images))
 
 
     def send_image(self, connection, directory):
         """Envia uma imagem para o cliente"""
         image_name = deserialize_string(connection)
         image_path = os.path.join(directory, image_name)
+        print(f'Enviando imagem "{image_name}')
         if not os.path.exists(image_path):
-            serialize_bool(connection, False)
+            # serialize_bool(connection, False)
             return
-        serialize_bool(connection, True)
+        # serialize_bool(connection, True)
         image_size = os.path.getsize(image_path)
         serialize_int(connection, image_size)
         with open(image_path, 'rb') as file:
@@ -68,10 +69,10 @@ class DataNode:
         """Deleta uma imagem"""
         image_name = deserialize_string(connection)
         image_path = os.path.join(directory, image_name)
+        print(f'Deletando imagem "{image_name}')
+        # TODO: retornar false se algum erro ocorrer
         if not os.path.exists(image_path):
-            serialize_bool(connection, False)
             return
-        serialize_bool(connection, True)
         os.remove(image_path)
 
 
@@ -90,7 +91,7 @@ class DataNode:
 
                 case 3: # Listar imagens
                     print(f'[COMANDO] {address[0]}:{address[1]}: Listar imagens.')
-                    self.list_images(connection, self.IMAGES_DIR)
+                    # self.list_images(connection, self.IMAGES_DIR)
                         
                 case 4: # Deletar imagem
                     print(f'[COMANDO] {address[0]}:{address[1]}: Deletar imagem.')

@@ -35,13 +35,13 @@ class DataNode:
         print(f'Imagem "{image_name}" armazenada com sucesso.')
 
 
-    def list_images(self, connection, directory):
-        """Lista todas as imagens que o cliente salvou"""
-        images = os.listdir(directory)
-        num_images = len(images)
-        serialize_int(connection, num_images)
-        if num_images > 0:
-            serialize_string(connection, '\n'.join(images))
+    # def list_images(self, connection, directory):
+    #     """Lista todas as imagens que o cliente salvou"""
+    #     images = os.listdir(directory)
+    #     num_images = len(images)
+    #     serialize_int(connection, num_images)
+    #     if num_images > 0:
+    #         serialize_string(connection, '\n'.join(images))
 
 
     def send_image(self, connection, directory):
@@ -63,10 +63,9 @@ class DataNode:
         """Deleta uma imagem"""
         image_name = deserialize_string(connection)
         image_path = os.path.join(directory, image_name)
+        # TODO: retornar false se algum erro ocorrer
         if not os.path.exists(image_path):
-            serialize_bool(connection, False)
             return
-        serialize_bool(connection, True)
         os.remove(image_path)
 
 

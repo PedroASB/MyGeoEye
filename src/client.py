@@ -53,8 +53,10 @@ class Client:
         """Lista as imagens que já foram salvas"""
         num_images = deserialize_int(self.server_socket)
         if num_images > 0:
-            images = deserialize_string(self.server_socket)
-            print('\nImagens armazenadas:\n' + images)
+            print('\nImagens armazenadas:\n')
+            for _ in range(num_images):
+                image_name = deserialize_string(self.server_socket)
+                print(image_name)
         else:
             print('\nNenhuma imagem armazenada.')
 
