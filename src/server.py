@@ -32,7 +32,9 @@ class Server:
         # img_01  ->  [[3 4], 1]
         selected_nodes = self.cluster.select_nodes_to_store()
 
-        print('[INFO] Data nodes selecionados:', selected_nodes)
+        print('[INFO] Data nodes selecionados para armazenamento: ', end='')
+        for node in selected_nodes:
+            print(node, end=' ')
 
         for node_id in selected_nodes:
             data_node_socket = self.cluster.data_node_id[node_id][1]
@@ -41,8 +43,9 @@ class Server:
             serialize_string(data_node_socket, image_name)
             serialize_int(data_node_socket, image_size)
         
-        print('[INFO] Tabela de índices:', self.cluster.index_table)
-        print('==============')
+        print('\n[INFO] Tabela de índices:')
+        for key, value in self.cluster.index_table.items():
+            print(f'{key}: {value[0]}')
 
         # Função para enviar um chunk para todos os data nodes simultaneamente
         def send_chunk_to_all_nodes(chunk):

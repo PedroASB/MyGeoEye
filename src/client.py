@@ -1,6 +1,7 @@
 import socket
 import os
 from serialization import *
+from time import time
 
 HOST_NAME = socket.gethostname()
 IP_SERVER = socket.gethostbyname(HOST_NAME)
@@ -36,7 +37,7 @@ class Client:
         serialize_string(self.client_socket, image_name)
         has_image = deserialize_bool(self.client_socket)
         if not has_image:
-            print('\n[ERRO] Arquivo de imagem não encontrado.')
+            print(f'\n[ERRO] Arquivo de imagem "{image_name}" não encontrado.')
             return
         image_size = deserialize_int(self.client_socket)
         image_path = os.path.join(directory, image_name)
@@ -106,9 +107,12 @@ class Client:
                     images = []
                     for _ in range(number_of_images):
                         images.append(str(input('Nome da imagem: ')))
+                    start_time = time()
                     for image_name in images:
                         serialize_int(self.client_socket, 2)
                         self.download_image(self.IMAGES_DIR, image_name)
+                    end_time = time()
+                    print(f"\nTempo de download: {end_time - start_time:.6f} segundo(s)")
 
                 case '3': # Listar imagens
                     serialize_int(self.client_socket, 3)
