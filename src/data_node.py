@@ -4,28 +4,30 @@ from serialization import *
 
 HOST_NAME = socket.gethostname()
 IP_DATA_NODE = socket.gethostbyname(HOST_NAME)
-PORT_DATA_NODE = 6000
+PORT_DATA_NODE = 8000
 
 class DataNode:
     IMAGES_DIR = 'database'
 
     def __init__(self, ip=IP_DATA_NODE, port=PORT_DATA_NODE):
-        # Se o diretório de imagens não existir, ele será criado
         if not os.path.exists(self.IMAGES_DIR):
             os.makedirs(self.IMAGES_DIR)
-
-        # Cria o socket do cluster (TCP/IP) e associa-o ao endereço e porta
         self.ip = ip
         self.port = port
         self.address = (self.ip, self.port)
         self.server_socket = None
 
 
-    def save_image(self, connection, directory):
+    def store_image(self, connection, directory):
         """Armazena a imagem"""
         image_name = deserialize_string(connection)
         image_size = deserialize_int(connection)
         image_path = os.path.join(directory, image_name)
+
+        print('image_name =', image_name)
+        print('image_size =', image_size)
+        print('image_path =', image_path)
+
         with open(image_path, 'wb') as file:
             received_size = 0
             while received_size < image_size:
@@ -34,24 +36,13 @@ class DataNode:
                 received_size += len(data)
         print(f'Imagem "{image_name}" armazenada com sucesso.')
 
-
-    # def list_images(self, connection, directory):
-    #     """Lista todas as imagens que o cliente salvou"""
-    #     images = os.listdir(directory)
-    #     num_images = len(images)
-    #     serialize_int(connection, num_images)
-    #     if num_images > 0:
-    #         serialize_string(connection, '\n'.join(images))
-
-
     def send_image(self, connection, directory):
         """Envia uma imagem para o cliente"""
         image_name = deserialize_string(connection)
         image_path = os.path.join(directory, image_name)
+        print(f'Enviando imagem "{image_name}')
         if not os.path.exists(image_path):
-            serialize_bool(connection, False)
             return
-        serialize_bool(connection, True)
         image_size = os.path.getsize(image_path)
         serialize_int(connection, image_size)
         with open(image_path, 'rb') as file:
@@ -63,6 +54,7 @@ class DataNode:
         """Deleta uma imagem"""
         image_name = deserialize_string(connection)
         image_path = os.path.join(directory, image_name)
+        print(f'Deletando imagem "{image_name}')
         # TODO: retornar false se algum erro ocorrer
         if not os.path.exists(image_path):
             return
@@ -76,16 +68,12 @@ class DataNode:
             match option:
                 case 1: # Inserir imagem
                     print(f'[COMANDO] {address[0]}:{address[1]}: Inserir imagem.')
-                    self.save_image(connection, self.IMAGES_DIR)
+                    self.store_image(connection, self.IMAGES_DIR)
                     
                 case 2: # Baixar imagem
                     print(f'[COMANDO] {address[0]}:{address[1]}: Baixar imagem.')
                     self.send_image(connection, self.IMAGES_DIR)
 
-                case 3: # Listar imagens
-                    print(f'[COMANDO] {address[0]}:{address[1]}: Listar imagens.')
-                    self.list_images(connection, self.IMAGES_DIR)
-                        
                 case 4: # Deletar imagem
                     print(f'[COMANDO] {address[0]}:{address[1]}: Deletar imagem.')
                     self.delete_image(connection, self.IMAGES_DIR)
@@ -108,12 +96,8 @@ class DataNode:
         self.server_socket.listen(1)
         print(f'[STATUS] Data Node iniciado em {IP_DATA_NODE}:{PORT_DATA_NODE}.')
         while True:
-            # TODO: confirmar connection e address
             connection, address = self.server_socket.accept()
             self.handle_server(connection, address)
-            # thread = threading.Thread(target=self.handle_server, args=(connection, address))
-            # thread.start()
-            # print(f'Conexões ativas: {threading.active_count() - 1}')
 
 
 if __name__ == "__main__":

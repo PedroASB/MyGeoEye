@@ -101,9 +101,15 @@ class Client:
                     self.upload_image(self.IMAGES_DIR, image_name)
 
                 case '2': # Baixar imagem
-                    serialize_int(self.server_socket, 2)
-                    image_name = str(input('\nImagem a ser baixada: '))
-                    self.download_image(self.IMAGES_DIR, image_name)
+                    number_of_images = int(input('\nQuantidade de imagens a serem baixadas: '))
+                    while number_of_images < 1:
+                        number_of_images = int(input('Informe um valor maior ou igual a 1: '))
+                    images = []
+                    for _ in range(number_of_images):
+                        images.append(str(input('Nome da imagem: ')))
+                    for image_name in images:
+                        serialize_int(self.server_socket, 2)
+                        self.download_image(self.IMAGES_DIR, image_name)
 
                 case '3': # Listar imagens
                     serialize_int(self.server_socket, 3)
