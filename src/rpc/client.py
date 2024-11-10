@@ -26,23 +26,18 @@ class Client:
         
 
     def upload_image(self, image_name):
-        # """Envia uma imagem para o servidor"""
-        # serialize_string(self.client_socket, image_name)
-        # image_path = os.path.join(directory, image_name)
-        # image_size = os.path.getsize(image_path)
-        # serialize_int(self.client_socket, image_size)
-        # with open(image_path, 'rb') as file:
-        #     while chunk := file.read(CHUNK_SIZE):
-        #         self.client_socket.send(chunk)
-        # print(f'\nImagem "{image_name}" enviada com sucesso.')
+        """Envia uma imagem para o servidor"""
         image_path = os.path.join(self.IMAGES_DIR, image_name)
         if not os.path.exists(image_path):
             print(f'[ERRO] Arquivo de imagem "{image_name}" não encontrado.')
-        else:
-            with open(image_path, 'rb') as file:
-                image_data = file.read()
-            self.client_conn.root.upload_image(image_name, image_data)
-            print(f'[STATUS] Imagem "{image_name}" enviada ao servidor.')
+            return
+        with open(image_path, "rb") as file:
+            image_data = file.read()
+        self.client_conn.root.upload_image(image_name, image_data)
+        # with open(image_path, "rb") as file:
+        #     while image_chunk := file.read(CHUNK_SIZE):
+        #         self.client_conn.root.upload_image_chunk(image_name, image_chunk)
+        # print(f'[STATUS] Imagem "{image_name}" enviada ao servidor.')
 
 
     def download_image(self, image_name):
@@ -106,25 +101,27 @@ class Client:
             print('4 - Deletar imagem')
             print('0 - Finalizar')
             command = input('>> ')
-
             match command:
                 case '1':
                     image_name = str(input('\nImagem a ser enviada: ')).strip()
                     self.upload_image(image_name)
+                    
                 case '2':
                     image_name = str(input('\nImagem a ser baixada: ')).strip()
                     self.download_image(image_name)
+
                 case '3':
                     self.list_images()
+
                 case '4':
                     image_name = str(input('\nImagem a ser deletada: ')).strip()
                     self.delete_image(image_name)
+
                 case '0':
                     break
 
                 case _:
                     print('\n[ERRO] Comando inválido.')
-
         self.client_conn.close()
         # print('[STATUS] Conexão encerrada.')
 
