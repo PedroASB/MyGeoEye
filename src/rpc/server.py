@@ -1,22 +1,29 @@
 import rpyc
+from itertools import cycle, islice
 from rpyc.utils.server import ThreadedServer
 from cluster import *
 from addresses import *
 
 
 PORT_SERVER = 5000
-CHUNK_SIZE = 65_536 # 64 KB
+CHUNK_SIZE = 65_536 # Tamanho de um chunk (64 KB)
+SHARD_SIZE = 2_097_152 # Tamanho de cada fragmento de imagem (2 MB)
 
 class Server(rpyc.Service):
     DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR]
     REPLICATION_FACTOR = 2 # Fator de réplica
-    DIVISION_FACTOR = 3 # Fator de divisão de uma imagem
 
     def __init__(self):
-        self.cluster = Cluster(self.DATA_NODES_ADDR, self.REPLICATION_FACTOR, self.DIVISION_FACTOR)
+        self.cluster = Cluster(self.DATA_NODES_ADDR, self.REPLICATION_FACTOR, SHARD_SIZE)
         self.cluster.connect_cluster()
         print('[STATUS] Servidor inicializado com o cluster.')
         self.current_data_nodes = None
+        self.current_image_name = None
+        self.current_image_size = None
+        self.current_image_part = None
+        self.current_image_tamanho_acomulado = 0
+        self.current_data_nodes_index = None
+        self.round_robin_nodes = None
 
 
     def on_connect(self, conn):
@@ -27,12 +34,43 @@ class Server(rpyc.Service):
         print("[STATUS] Cliente desconectado.")
 
     
-    def exposed_upload_image_chunk(self, image_name, image_chunk):
-        for node_id in self.current_data_nodes:
-            data_node_conn = self.cluster.data_nodes[node_id][1]
-            # Recebe o chunk do cliente e o encaminha imediatamente ao data node
-            data_node_conn.root.store_image_chunk(image_name, image_chunk)
-            print(f"Chunk de {len(image_chunk)} bytes encaminhado ao Data Node para {image_name}")
+    def exposed_init_upload_image_chunk(self, image_name, image_size):
+        self.current_image_name = image_name
+        self.current_image_size = image_size
+        self.current_image_part = 0
+        self.current_data_nodes_index = 0
+        # self.current_data_nodes = self.cluster.select_nodes_to_store()
+        # self.round_robin = cycle(self.current_data_nodes)
+        self.round_robin_nodes = cycle(self.cluster.select_nodes_to_store())
+        self.current_data_nodes = islice(self.round_robin_nodes, self.current_data_nodes_index, \
+                                         self.current_data_nodes_index + self.REPLICATION_FACTOR)
+                
+    def exposed_upload_image_chunk(self, image_chunk):
+        # ========================================================
+        # [node_0, node_1, node_2, node_3]
+        # [node_0, node_1]
+        # [node_2, node_3]
+        results = islice(self.round_robin_nodes, self.current_data_nodes_index, self.current_data_nodes_index + self.REPLICATION_FACTOR)
+        for node in results:
+            if self.current_image_tamanho_acomulado + image_chunk <= SHARD_SIZE:
+                self.current_image_tamanho_acomulado += image_chunk
+                ##
+            else:
+                self.current_image_tamanho_acomulado = image_chunk
+                self.current_image_part += 1
+                ##
+
+            node['conn'].root.store_image_chunk(image_chunk, self.current_image_part)
+        
+        self.current_data_nodes_index += self.REPLICATION_FACTOR
+            
+    
+    # def exposed_end_upload_image_chunk(self, image_name, image_chunk):
+    #     for node_id in self.current_data_nodes:
+    #         data_node_conn = self.cluster.data_nodes[node_id][1]
+    #         # Recebe o chunk do cliente e o encaminha imediatamente ao data node
+    #         data_node_conn.root.store_image_chunk(image_name, image_chunk)
+    #         print(f"Chunk de {len(image_chunk)} bytes encaminhado ao Data Node para {image_name}")
 
 
     def exposed_receive_chunk(self, chunk):

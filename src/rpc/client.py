@@ -31,13 +31,14 @@ class Client:
         if not os.path.exists(image_path):
             print(f'[ERRO] Arquivo de imagem "{image_name}" não encontrado.')
             return
-        with open(image_path, "rb") as file:
-            image_data = file.read()
-        self.client_conn.root.upload_image(image_name, image_data)
+        self.client_conn.root.init_upload_image_chunk(image_name, len(image_path))
         # with open(image_path, "rb") as file:
-        #     while image_chunk := file.read(CHUNK_SIZE):
-        #         self.client_conn.root.upload_image_chunk(image_name, image_chunk)
-        # print(f'[STATUS] Imagem "{image_name}" enviada ao servidor.')
+        #     image_data = file.read()
+        # self.client_conn.root.upload_image(image_name, image_data)
+        with open(image_path, "rb") as file:
+            while image_chunk := file.read(CHUNK_SIZE):
+                self.client_conn.root.upload_image_chunk(image_name, image_chunk)
+        print(f'[STATUS] Imagem "{image_name}" enviada ao servidor.')
 
 
     def download_image(self, image_name):

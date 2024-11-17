@@ -2,6 +2,7 @@ import rpyc
 import time
 
 STATUS_WEIGHTS = {"cpu": 0.3, "memory": 0.2, "disk": 0.5}
+BASE_SCORE = 50
 
 class Cluster:
 
@@ -21,8 +22,8 @@ class Cluster:
                                                     'memory': None, 
                                                     'disk': None
                                                     }
-                                                } 
-                                                for i in range(self.cluster_size)} 
+                                                }
+                                                for i in range(self.cluster_size)}
 
 
     def connect_cluster(self):
@@ -72,7 +73,14 @@ class Cluster:
         # Calcula a pontuação de cada node com base nos recursos
         scored_nodes = sorted(self.data_nodes, key=self.calculate_score, reverse=True)
         # Seleciona os top K nodes com maior pontuação, onde K é o fator de réplica
-        top_nodes = scored_nodes[:(self.division_factor * self.replication_factor)]
+        #top_nodes = scored_nodes[:(self.division_factor * self.replication_factor)]
+        # Filtra os nodes com pontuação >= 50
+        top_nodes = [node for node in scored_nodes if node >= BASE_SCORE]
+
+        # Garante que no mínimo 2 nodes sejam selecionados, pegando os 2 maiores se necessário
+        if len(top_nodes) < self.replication_factor:
+            top_nodes = scored_nodes[:self.replication_factor]
+
         return top_nodes
 
 
