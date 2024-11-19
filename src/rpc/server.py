@@ -1,4 +1,5 @@
 import rpyc
+import math
 from itertools import cycle, islice
 from rpyc.utils.server import ThreadedServer
 from cluster import *
@@ -9,9 +10,14 @@ PORT_SERVER = 5000
 CHUNK_SIZE = 65_536 # Tamanho de um chunk (64 KB)
 SHARD_SIZE = 2_097_152 # Tamanho de cada fragmento de imagem (2 MB)
 
+# Ideia: criar uma classe "buffer" para armazenar variáveis current
+
 class Server(rpyc.Service):
-    DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR]
+    DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR]
     REPLICATION_FACTOR = 2 # Fator de réplica
+    # DATA_NODES_ADDR = [DATA_NODE_1_ADDR]
+    # REPLICATION_FACTOR = 1 # Fator de réplica
+
 
     def __init__(self):
         self.cluster = Cluster(self.DATA_NODES_ADDR, self.REPLICATION_FACTOR, SHARD_SIZE)
@@ -21,9 +27,11 @@ class Server(rpyc.Service):
         self.current_image_name = None
         self.current_image_size = None
         self.current_image_part = None
-        self.current_image_tamanho_acomulado = 0
+        self.current_image_size_division = None
+        self.current_image_accumulated_size = None
         self.current_data_nodes_index = None
         self.round_robin_nodes = None
+        self.image_part_nodes = None
 
 
     def on_connect(self, conn):
@@ -33,37 +41,128 @@ class Server(rpyc.Service):
     def on_disconnect(self, conn):
         print("[STATUS] Cliente desconectado.")
 
-    
     def exposed_init_upload_image_chunk(self, image_name, image_size):
         self.current_image_name = image_name
         self.current_image_size = image_size
+        self.current_image_size_division = math.ceil(image_size / SHARD_SIZE)
         self.current_image_part = 0
         self.current_data_nodes_index = 0
+        self.current_image_accumulated_size = 0
+        
+        # Seleciona os nós para o armazenamento
+        nodes_to_store = self.cluster.select_nodes_to_store()
+        self.round_robin_nodes = cycle(nodes_to_store)
+        
+        # Prepara uma estrutura persistente para armazenar os nós de cada parte
+        self.image_part_nodes = {}
+
+        # Seleciona os primeiros nós para a parte inicial da imagem
+        self.image_part_nodes[self.current_image_part] = list(
+            islice(self.round_robin_nodes, self.REPLICATION_FACTOR)
+        )
+        
+        print(f'image_size = {image_size}, division = {image_size / SHARD_SIZE}')
+        print(f'current_image_size_division = {self.current_image_size_division}')
+        # Recupera os nós persistentes para a parte atual
+        current_data_nodes = self.image_part_nodes[self.current_image_part]
+        print('current_data_nodes:', end=' ')
+        for n in current_data_nodes:
+            print(n, end=' ')
+        print()
+
+
+
+    def exposed_upload_image_chunk(self, image_chunk):
+        
+        self.current_image_accumulated_size += CHUNK_SIZE
+        # Muda para a próxima parte se necessário
+        if self.current_image_accumulated_size > SHARD_SIZE:
+            self.current_image_accumulated_size = 0
+            self.current_image_part += 1
+            self.current_data_nodes_index += self.REPLICATION_FACTOR
+            
+            # Seleciona os próximos nós para a nova parte da imagem
+            self.image_part_nodes[self.current_image_part] = list(
+                islice(self.round_robin_nodes, self.REPLICATION_FACTOR)
+            )
+
+            # print('current_data_nodes:', end=' ')
+            # for n in current_data_nodes:
+            #     print(n, end=' ')
+            # print()
+
+        # Recupera os nós persistentes para a parte atual
+        current_data_nodes = self.image_part_nodes[self.current_image_part]
+
+        # Envia o chunk para os nós selecionados
+        for node_id in current_data_nodes:
+            print()
+            node = self.cluster.data_nodes[node_id]
+            node['conn'].root.store_image_chunk(
+                self.current_image_name, 
+                self.current_image_part, 
+                image_chunk
+            )
+            self.cluster.update_index_table(
+                self.current_image_name,
+                self.current_image_part,
+                node_id,
+                self.current_image_size_division
+            )
+
+
+    
+    def exposed_init_upload_image_chunk_(self, image_name, image_size):
+        self.current_image_name = image_name
+        self.current_image_size = image_size
+        self.current_image_size_division = math.ceil(image_size / SHARD_SIZE)
+        self.current_image_part = 0
+        self.current_data_nodes_index = 0
+        self.current_image_accumulated_size = 0
         # self.current_data_nodes = self.cluster.select_nodes_to_store()
         # self.round_robin = cycle(self.current_data_nodes)
-        self.round_robin_nodes = cycle(self.cluster.select_nodes_to_store())
-        self.current_data_nodes = islice(self.round_robin_nodes, self.current_data_nodes_index, \
-                                         self.current_data_nodes_index + self.REPLICATION_FACTOR)
-                
-    def exposed_upload_image_chunk(self, image_chunk):
-        # ========================================================
-        # [node_0, node_1, node_2, node_3]
-        # [node_0, node_1]
-        # [node_2, node_3]
-        results = islice(self.round_robin_nodes, self.current_data_nodes_index, self.current_data_nodes_index + self.REPLICATION_FACTOR)
-        for node in results:
-            if self.current_image_tamanho_acomulado + image_chunk <= SHARD_SIZE:
-                self.current_image_tamanho_acomulado += image_chunk
-                ##
-            else:
-                self.current_image_tamanho_acomulado = image_chunk
-                self.current_image_part += 1
-                ##
-
-            node['conn'].root.store_image_chunk(image_chunk, self.current_image_part)
         
-        self.current_data_nodes_index += self.REPLICATION_FACTOR
-            
+        # self.round_robin_nodes = cycle(self.cluster.select_nodes_to_store())
+        nodes_to_store = self.cluster.select_nodes_to_store()
+        self.round_robin_nodes = cycle(nodes_to_store)
+
+        self.current_data_nodes = islice(self.round_robin_nodes, self.current_data_nodes_index,\
+                                         self.current_data_nodes_index + self.REPLICATION_FACTOR)
+        
+        print(f'image_size = {image_size}, division = {image_size / SHARD_SIZE}')
+        print(f'current_image_size_division = {self.current_image_size_division}')
+        print('data nodes = ')
+        for i in range(self.cluster.cluster_size):
+            print(nodes_to_store[i], end=' ')
+        print()
+
+    
+    def exposed_upload_image_chunk_(self, image_chunk):
+        self.current_image_accumulated_size += CHUNK_SIZE
+        
+        if self.current_image_accumulated_size > SHARD_SIZE:
+            self.current_image_accumulated_size = 0
+            self.current_image_part += 1
+            self.current_data_nodes_index += self.REPLICATION_FACTOR
+            self.current_data_nodes = islice(self.round_robin_nodes, self.current_data_nodes_index,\
+                                         self.current_data_nodes_index + self.REPLICATION_FACTOR)
+
+        print('current_data_nodes:', end=' ')
+        for n in self.current_data_nodes:
+            print(n, end=' ')
+        print()
+
+        for node_id in self.current_data_nodes:
+            print()
+            node = self.cluster.data_nodes[node_id]
+            node['conn'].root.store_image_chunk(self.current_image_name, self.current_image_part, image_chunk)
+            self.cluster.update_index_table(self.current_image_name, self.current_image_part,\
+                                            node_id, self.current_image_size_division)
+        
+        
+        
+
+
     
     # def exposed_end_upload_image_chunk(self, image_name, image_chunk):
     #     for node_id in self.current_data_nodes:

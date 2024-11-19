@@ -13,6 +13,15 @@ class DataNode(rpyc.Service):
         if not os.path.exists(self.STORAGE_DIR):
             os.makedirs(self.STORAGE_DIR)
 
+    def exposed_clear_storage_dir(self):
+        """Remove todos os arquivos e subdiretórios do diretório de armazenamento."""
+        if os.path.exists(self.STORAGE_DIR):
+            for root, dirs, files in os.walk(self.STORAGE_DIR, topdown=False):
+                # Remove todos os arquivos
+                for file in files:
+                    os.remove(os.path.join(root, file))
+
+
 
     def on_connect(self, conn):
         print("[STATUS] Data node conectado.")
@@ -30,14 +39,10 @@ class DataNode(rpyc.Service):
         return {'cpu': cpu_usage, 'memory': memory_info, 'disk': disk_info}
 
 
-    def exposed_store_image_chunk(self, image_name, image_chunk):
-        # image_path = os.path.join(self.STORAGE_DIR, image_name)
-        # with open(image_path, 'wb') as file:
-        #     file.write(image_data)
-        # print(f'[STATUS] Imagem "{image_name}" armazenada com sucesso.')
-        
+    def exposed_store_image_chunk(self, image_name, image_part, image_chunk):
         # Cria o diretório onde os chunks serão salvos, se necessário
-        image_path = os.path.join(self.STORAGE_DIR, image_name)
+        image_part_name = f'{image_name}%part{image_part}%'
+        image_path = os.path.join(self.STORAGE_DIR, image_part_name)
         # Armazena o chunk recebido
         with open(image_path, "ab") as file:
             file.write(image_chunk)
@@ -70,6 +75,4 @@ class DataNode(rpyc.Service):
 
 if __name__ == "__main__":
     data_node = DataNode()
-    # data_node.start()
-    status = data_node.exposed_get_node_status()
-    print(status)
+    data_node.start()

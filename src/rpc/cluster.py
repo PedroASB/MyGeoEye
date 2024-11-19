@@ -44,6 +44,8 @@ class Cluster:
                 print(f"[STATUS] Tentando conectar ao data node em {ip}:{port}...")
                 data_node_conn = rpyc.connect(ip, port)
                 print(f"[STATUS] Conexão com o data node estabelecida em {ip}:{port}.")
+                # TODO: tirar isso:
+                data_node_conn.root.clear_storage_dir()
             except ConnectionRefusedError:
                 print("[STATUS] Conexão recusada. Tentando novamente em 5 segundos...")
                 data_node_conn = None
@@ -51,12 +53,15 @@ class Cluster:
         return data_node_conn
     
 
-    def calculate_score(self,node_id):
+    def calculate_score(self, node_id):
         """Função para calcular o score com base nos recursos disponíveis"""
         # data_node = ['addr', 'conn', 'status']
+        return 50
         data_node_conn = self.data_nodes[node_id]['conn']
-        self.data_nodes[node_id]['status'] = data_node_conn.get_node_status()
+        self.data_nodes[node_id]['status'] = data_node_conn.root.get_node_status()
         cpu, memory, disk = self.data_nodes[node_id]['status'].values()
+        print()
+
         return (
             (100 - cpu)    * STATUS_WEIGHTS['cpu'] +
             (100 - memory) * STATUS_WEIGHTS['memory'] +
@@ -69,18 +74,14 @@ class Cluster:
         Seleciona os data nodes para armazenamento de imagens
         Utiliza-se balanceamento de carga pelos recursos de máquina
         """
-
-        # Calcula a pontuação de cada node com base nos recursos
-        scored_nodes = sorted(self.data_nodes, key=self.calculate_score, reverse=True)
-        # Seleciona os top K nodes com maior pontuação, onde K é o fator de réplica
-        #top_nodes = scored_nodes[:(self.division_factor * self.replication_factor)]
-        # Filtra os nodes com pontuação >= 50
-        top_nodes = [node for node in scored_nodes if node >= BASE_SCORE]
-
-        # Garante que no mínimo 2 nodes sejam selecionados, pegando os 2 maiores se necessário
+        scored_nodes = [
+            (node, self.calculate_score(node))
+            for node in self.data_nodes
+        ]
+        scored_nodes.sort(key=lambda x: x[1], reverse=True)
+        top_nodes = [node for node, score in scored_nodes if score >= BASE_SCORE]
         if len(top_nodes) < self.replication_factor:
-            top_nodes = scored_nodes[:self.replication_factor]
-
+            top_nodes = [node for node, _ in scored_nodes[:self.replication_factor]]
         return top_nodes
 
 
@@ -101,12 +102,20 @@ class Cluster:
         return top_nodes
 
 
-    def update_index_table(self, image_name, node_id, part_num):
+    def init_update_index_table(self, image_name, part_num, node_id, image_size_division):
+        pass # TODO: implementar esta função
+
+    def update_index_table(self, image_name, part_num, node_id, image_size_division):
         """Atualiza a tabela de índices para uma imagem dividida em partes."""
         if image_name not in self.index_table:
-            # [[], [], []]
-            self.index_table[image_name] = [[] for _ in range(self.division_factor)]
-        self.index_table[image_name][part_num].append(node_id)
+            # img_01  ->  ['nodes': [part_0: [3 2 4], part_1: [2 8 7], part_2: [1 4 3]]]
+            self.index_table[image_name] = [[] for _ in range(image_size_division)]
+        elif node_id not in self.index_table[image_name][part_num]:
+            self.index_table[image_name][part_num].append(node_id)
+        print('index_table:')
+        for k, v in self.index_table.items():
+            print(f'{k}: {v}')
+        print()
 
 
 """
