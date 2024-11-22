@@ -12,6 +12,7 @@ class DataNode(rpyc.Service):
     def __init__(self):
         if not os.path.exists(self.STORAGE_DIR):
             os.makedirs(self.STORAGE_DIR)
+        self.open_files = {}
 
     def exposed_clear_storage_dir(self):
         """Remove todos os arquivos e subdiretórios do diretório de armazenamento."""
@@ -20,8 +21,6 @@ class DataNode(rpyc.Service):
                 # Remove todos os arquivos
                 for file in files:
                     os.remove(os.path.join(root, file))
-
-
 
     def on_connect(self, conn):
         print("[STATUS] Data node conectado.")
@@ -48,14 +47,32 @@ class DataNode(rpyc.Service):
             file.write(image_chunk)
 
 
-    def exposed_retrieve_image(self, image_name):
-        image_path = os.path.join(self.STORAGE_DIR, image_name)
-        if os.path.exists(image_path):
-            print(f'[STATUS] Recuperando imagem "{image_name}".')
-            with open(image_path, 'rb') as file:
-                return file.read()
-        print(f'[STATUS] Imagem "{image_name}" não encontrada.')
-        return None
+    def exposed_retrieve_image_chunk(self, image_name, image_part):
+        """
+        Envia chunks de uma parte de imagem para o servidor de forma incremental.
+        """
+        image_part_name = f'{image_name}%part{image_part}%'
+        image_path = os.path.join(self.STORAGE_DIR, image_part_name)
+        
+        # Verificar se o arquivo já está aberto
+        if image_part not in self.open_files:
+            if not os.path.exists(image_path):
+                print(f"[ERRO] Parte da imagem '{image_part}' não encontrada.")
+                return None
+            # Abrir o arquivo e armazenar no mapeamento
+            self.open_files[image_part] = open(image_path, "rb")
+
+        file = self.open_files[image_part]
+        image_chunk = file.read(CHUNK_SIZE)
+
+        # Se o arquivo terminou, feche-o e remova-o do mapeamento
+        if not image_chunk:
+            file.close()
+            del self.open_files[image_part]
+            print(f"[STATUS] Leitura da parte '{image_part}' concluída.")
+            return None
+        
+        return image_chunk
 
 
     def exposed_delete_image(self, image_name):
@@ -68,7 +85,7 @@ class DataNode(rpyc.Service):
     
     
     def start(self):
-        threaded_data_node = ThreadedServer(service=DataNode, port=PORT_DATA_NODE)
+        threaded_data_node = ThreadedServer(service=DataNode, port=PORT_DATA_NODE, protocol_config={'allow_public_attrs': True})
         threaded_data_node.start()
         print("[STATUS] Data node iniciado.")
 

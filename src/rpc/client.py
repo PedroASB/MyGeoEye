@@ -18,11 +18,11 @@ class Client:
 
 
     def on_connect(self, conn):
-        print("[STATUS] Conexão com o servidor estabelecida.")
+        pass
 
 
     def on_disconnect(self, conn):
-        print("[STATUS] Conexão com o servidor encerrada.")
+        pass
         
 
     def upload_image(self, image_name):
@@ -43,28 +43,20 @@ class Client:
 
 
     def download_image(self, image_name):
-        # """Baixa uma imagem do servidor"""
-        # serialize_string(self.client_socket, image_name)
-        # has_image = deserialize_bool(self.client_socket)
-        # if not has_image:
-        #     print(f'\n[ERRO] Arquivo de imagem "{image_name}" não encontrado.')
-        #     return
-        # image_size = deserialize_int(self.client_socket)
-        # image_path = os.path.join(directory, image_name)
-        # with open(image_path, 'wb') as file:
-        #     received_size = 0
-        #     while received_size < image_size:
-        #         data = self.client_socket.recv(CHUNK_SIZE)
-        #         file.write(data)
-        #         received_size += len(data)
-        # print(f'Imagem "{image_name}" armazenada com sucesso em "{directory}/".')
-        image_data = self.client_conn.root.download_image(image_name)
-        if image_data:
-            with open(os.path.join(self.IMAGES_DIR, image_name), 'wb') as file:
-                file.write(image_data)
-            print(f'[STATUS] Imagem "{image_name}" baixada com sucesso.')
-        else:
-            print('[ERRO] Imagem não encontrada no servidor.')
+        attempt, error_msg, image_size = self.client_conn.root.init_download_image_chunk(image_name)
+        if not attempt:
+            print(error_msg)
+            return
+        image_path = os.path.join(self.IMAGES_DIR, image_name)
+        with open(image_path, 'ab') as file:
+            received_size = 0
+            while received_size < image_size:
+                image_chunk = self.client_conn.root.download_image_chunk()
+                if not image_chunk:
+                    break
+                file.write(image_chunk)
+                received_size += len(image_chunk)
+        print(f'Imagem "{image_name}" armazenada com sucesso em "{self.IMAGES_DIR}/".')
 
 
     def list_images(self):
@@ -89,7 +81,7 @@ class Client:
         while not self.client_conn:
             try:
                 self.client_conn = rpyc.connect(self.ip, self.port)
-                # print('[STATUS] Conectado ao servidor.')
+                print('[STATUS] Conexão com servidor estabelecida.')
             except ConnectionRefusedError:
                 print("[STATUS] Conexão recusada. Tentando novamente em 5 segundos...")
                 self.client_conn = None

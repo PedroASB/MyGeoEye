@@ -25,11 +25,13 @@ class Server(rpyc.Service):
         print('[STATUS] Servidor inicializado com o cluster.')
         self.current_image_name = None
         self.current_image_size = None
-        self.current_image_part = None
+        self.current_shard_index = None
+        self.current_image_chunk = None
         self.current_image_size_division = None
+        self.current_shard_accumulated_size = None
         self.current_image_accumulated_size = None
         self.round_robin_nodes = None
-        self.current_storage_nodes = None
+        self.selected_nodes = None
 
 
     def on_connect(self, conn):
@@ -43,9 +45,10 @@ class Server(rpyc.Service):
         self.current_image_name = image_name
         self.current_image_size = image_size
         self.current_image_size_division = math.ceil(image_size / SHARD_SIZE)
-        self.current_image_part = 0
-        self.current_image_accumulated_size = 0
-        self.current_storage_nodes = {}
+        self.current_shard_index = 0
+        self.current_shard_accumulated_size = 0
+        self.current_image_accumulated_size = 0        
+        self.selected_nodes = {}
         
         if not self.cluster.init_update_index_table(self.current_image_name,
                                                     self.current_image_size_division):
@@ -55,10 +58,10 @@ class Server(rpyc.Service):
         self.round_robin_nodes = cycle(self.cluster.select_nodes_to_store())
         
         # Seleciona os primeiros nós para a parte inicial da imagem
-        self.current_storage_nodes = list(islice(self.round_robin_nodes,
+        self.selected_nodes = list(islice(self.round_robin_nodes,
                                                  self.REPLICATION_FACTOR))
         
-        return True, ""
+        return True, None
         # print(f'image_size = {image_size}, division = {image_size / SHARD_SIZE}')
         # print(f'current_image_size_division = {self.current_image_size_division}')
         # print('current_storage_nodes:', end=' ')
@@ -66,61 +69,56 @@ class Server(rpyc.Service):
         #     print(n, end=' ')
         # print()
 
+
+    def update_index_table(self):
+        self.cluster.update_index_table(self.current_image_name, # img_01 
+                                        self.current_shard_index, # part_0
+                                        self.current_shard_accumulated_size, # 1.999 MB 
+                                        self.selected_nodes) # [1 2]
+
+
     def exposed_upload_image_chunk(self, image_chunk):
-        
-        self.current_image_accumulated_size += CHUNK_SIZE
-        # Muda para a próxima parte se necessário
-        if self.current_image_accumulated_size > SHARD_SIZE:
-            self.current_image_accumulated_size = 0
-            self.current_image_part += 1
-            # Seleciona os próximos nós para a nova parte da imagem
-            self.current_storage_nodes = list(islice(self.round_robin_nodes,
+        image_chunk_size = len(image_chunk)
+        if self.current_shard_accumulated_size + image_chunk_size > SHARD_SIZE:
+            self.update_index_table()
+            self.current_shard_accumulated_size = 0
+            self.current_shard_index += 1
+            self.selected_nodes = list(islice(self.round_robin_nodes,
                                                      self.REPLICATION_FACTOR))
-            # print('current_storage_nodes:', end=' ')
-            # for n in self.current_storage_nodes:
-            #     print(n, end=' ')
-            # print()
+
+        self.current_shard_accumulated_size += image_chunk_size
+        self.current_image_accumulated_size += image_chunk_size
+
+        if self.current_image_size == self.current_image_accumulated_size:
+            self.update_index_table()
 
         # Envia o chunk para os nós selecionados
-        for node_id in self.current_storage_nodes:
+        for node_id in self.selected_nodes:
             node = self.cluster.data_nodes[node_id]
             node['conn'].root.store_image_chunk(self.current_image_name,
-                                                self.current_image_part, image_chunk)
-            self.cluster.update_index_table(self.current_image_name, self.current_image_part, node_id)
+                                                self.current_shard_index, image_chunk)
+            
 
-
-    def retrieve_image_from_parts(self, image_name):
-        """Recupera uma imagem dividida em partes a partir dos nós selecionados."""
-        parts = self.cluster.index_table.get(image_name, [])
-        image_data = b""
-
-        for node_id, part_num in parts:
-            part_image_name = f"{image_name}%part%{part_num}"
-            part_data = self.cluster.data_nodes[node_id]['conn'].exposed_retrieve_image(part_image_name)
-            for chunk in part_data:
-                image_data += chunk
-
-        print(f'[STATUS] Imagem "{image_name}" recuperada com sucesso.')
-        return image_data
-    
-    def exposed_download_image(self, image_name):
-        if image_name in self.cluster.index_table:
-            has_image = True
-        else:
-            has_image = False
+    def exposed_init_download_image_chunk(self, image_name):
+        if image_name not in self.cluster.index_table:
+            return False, f'[ERRO] A imagem "{image_name}" não existe', None
         
-        if not has_image:
-            return
-        
-        # Selecionado o data node para realizar o upload
-        node_id = self.cluster.select_nodes_to_retrieve(image_name)
-        data_node_conn = self.cluster.data_nodes[node_id][1]
+        self.selected_nodes = self.cluster.select_nodes_to_retrieve(image_name)
+        self.current_shard_index = 0
 
-        print('[INFO] Data node selecionado para download:', node_id)
-        
-        image_data = data_node_conn.root.retrieve_image(image_name)
+        return True, None, self.current_image_size
 
-        return image_data
+
+    def exposed_download_image_chunk(self):
+        index = self.current_shard_index
+        node_id = self.selected_nodes[index]
+        node = self.cluster.data_nodes[node_id]
+        image_chunk = node['conn'].root.retrieve_image_chunk(self.current_image_name, index)
+        if not image_chunk:
+            self.current_shard_index += 1
+            if self.current_shard_index < len(self.selected_nodes):
+                image_chunk = node['conn'].root.retrieve_image_chunk(self.current_image_name, index)
+        return image_chunk
 
 
     def exposed_list_images(self):

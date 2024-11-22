@@ -76,41 +76,62 @@ class Cluster:
             for node_id in self.data_nodes
         ]
         scored_nodes.sort(key=lambda x: x[1], reverse=True)
-        top_nodes = [node for node, score in scored_nodes if score >= BASE_SCORE]
-        if len(top_nodes) < self.replication_factor:
-            top_nodes = [node for node, _ in scored_nodes[:self.replication_factor]]
-        return top_nodes
+        storage_nodes = [node for node, score in scored_nodes if score >= BASE_SCORE]
+        if len(storage_nodes) < self.replication_factor:
+            storage_nodes = [node for node, _ in scored_nodes[:self.replication_factor]]
+        return storage_nodes
 
 
     def select_nodes_to_retrieve(self, image_name):
         """
-        Seleciona os data nodes para recuperar uma imagem
+        Seleciona os data nodes para armazenamento de imagens
         Utiliza-se balanceamento de carga pelos recursos de máquina
         """
-        top_nodes = []
-        # img_01  ->  ['nodes': [part_0: [3 2 4], part_1: [2 8 7], part_2: [1 4 3]]]
-        for data_nodes_block in self.index_table[image_name]:
-            # [3 2 4] -> sorted: [4 2 3]
-            scored_nodes = sorted(data_nodes_block, key=self.calculate_score, reverse=True)
-            # Seleciona o melhor nó de cada parte da imagem
-            top_nodes.append(scored_nodes[:1]) # 4
-        # top_nodes = [4 8 3]
+        # img_01  ->  [[part_0: {'nodes': 3 2 4, 'size': 100}, ...]
+        retrieval_nodes = []
+        for shard in self.index_table[image_name]:
+            # shard => {'nodes': 3 2 4, 'size': 100}
+            # sorted([(id, 5), (id, 3), (id, 2)])
+
+            scored_nodes = [
+                node_id for node_id, _ in sorted(
+                    ((node_id, self.calculate_score(node_id)) for node_id in shard['nodes']),
+                    key=lambda x: x[1],
+                    reverse=True
+                )
+            ]
+        print('retrieval_nodes =', retrieval_nodes)
+
         
-        return top_nodes
+        retrieval_nodes.append(scored_nodes[0])
+
+        return retrieval_nodes
+    
+
+
+    def image_total_size(self, image_name):
+        total_size = 0
+        for shard in self.index_table[image_name]:
+            total_size += shard['size']
+        return total_size
 
 
     def init_update_index_table(self, image_name, image_size_division):
         if image_name in self.index_table:
             return False
-        # img_01  ->  [[part_0: [nodes: 3 2 4], part_1: [nodes: 2 8 7], ...]
-        self.index_table[image_name] = [[] for _ in range(image_size_division)]
+        # img_01  ->  [[part_0: {'nodes': 3 2 4, 'size': 100}, ...]
+        self.index_table[image_name] = [{'nodes': [], 'size': None} \
+                                        for _ in range(image_size_division)]
         return True
             
 
-    def update_index_table(self, image_name, part_num, node_id):
+    def update_index_table(self, image_name, shard_index, shard_size, nodes_id):
         """Atualiza a tabela de índices para uma imagem dividida em partes."""
-        if node_id not in self.index_table[image_name][part_num]:
-            self.index_table[image_name][part_num].append(node_id)
+        # img_01  ->  [[part_0: {'nodes': 3 2 4, 'size': 100}, ...]
+        for node_id in nodes_id:
+            if node_id not in self.index_table[image_name][shard_index]:
+                self.index_table[image_name][shard_index]['nodes'].append(node_id)
+        self.index_table[image_name][shard_index]['size'] = shard_size
         # print('index_table:')
         # for k, v in self.index_table.items():
         #     print(f'{k}: {v}')
