@@ -55,13 +55,10 @@ class Cluster:
 
     def calculate_score(self, node_id):
         """Função para calcular o score com base nos recursos disponíveis"""
-        # data_node = ['addr', 'conn', 'status']
-        return 50
+        # return 50
         data_node_conn = self.data_nodes[node_id]['conn']
         self.data_nodes[node_id]['status'] = data_node_conn.root.get_node_status()
-        cpu, memory, disk = self.data_nodes[node_id]['status'].values()
-        print()
-
+        cpu, memory, disk = list(self.data_nodes[node_id]['status'].values())
         return (
             (100 - cpu)    * STATUS_WEIGHTS['cpu'] +
             (100 - memory) * STATUS_WEIGHTS['memory'] +
@@ -75,8 +72,8 @@ class Cluster:
         Utiliza-se balanceamento de carga pelos recursos de máquina
         """
         scored_nodes = [
-            (node, self.calculate_score(node))
-            for node in self.data_nodes
+            (node_id, self.calculate_score(node_id))
+            for node_id in self.data_nodes
         ]
         scored_nodes.sort(key=lambda x: x[1], reverse=True)
         top_nodes = [node for node, score in scored_nodes if score >= BASE_SCORE]
@@ -102,69 +99,19 @@ class Cluster:
         return top_nodes
 
 
-    def init_update_index_table(self, image_name, part_num, node_id, image_size_division):
-        pass # TODO: implementar esta função
+    def init_update_index_table(self, image_name, image_size_division):
+        if image_name in self.index_table:
+            return False
+        # img_01  ->  [[part_0: [nodes: 3 2 4], part_1: [nodes: 2 8 7], ...]
+        self.index_table[image_name] = [[] for _ in range(image_size_division)]
+        return True
+            
 
-    def update_index_table(self, image_name, part_num, node_id, image_size_division):
+    def update_index_table(self, image_name, part_num, node_id):
         """Atualiza a tabela de índices para uma imagem dividida em partes."""
-        if image_name not in self.index_table:
-            # img_01  ->  ['nodes': [part_0: [3 2 4], part_1: [2 8 7], part_2: [1 4 3]]]
-            self.index_table[image_name] = [[] for _ in range(image_size_division)]
-        elif node_id not in self.index_table[image_name][part_num]:
+        if node_id not in self.index_table[image_name][part_num]:
             self.index_table[image_name][part_num].append(node_id)
-        print('index_table:')
-        for k, v in self.index_table.items():
-            print(f'{k}: {v}')
-        print()
-
-
-"""
-    self.data_node_id = {f'data_node_{i+1}': [self.data_nodes[i], None] for i in range(self.cluster_size)}
-    
-    self.data_node_addresses
-    
-, 
-    DATA_NODE_1_ADDR = ('192.168.56.1', 8001)
-    pesos
-    data_node_1 = [DATA_NODE_1_ADDR, conn, info]
-
-    data_node_1 = {'addr': ('192.168.56.1', 8001), 'conn': ???}
-
-    data_nodes['data_node_1'] = {'addr': ('192.168.56.1', 8001), 'conn': ???, {'cpu': 3.5, 'memory': 30.2, 'disk': 25.5}}
-
-    data_nodes_status['data_node_1'] = {'cpu': 3.5, 'memory': 30.2, 'disk': 25.5}
-
-"""
-
-# MEMÓRIA RAM
-# img_01  ->  ['nodes': [0: [2 3 4], 1: [3 7 8], 2: [2 3 4]]]
-# img_02  ->  ['nodes': [4 5 6], [4 5 6], 'next_index': 1]
-# img_03  ->  ['nodes': [1 2 3], 'next_index': 1]
-
-# index_table[img_01] = [ [2 3 4], [3 7 8] ]
-# 100 MB -> 5 * 20 MB | 1000 MB -> 50 * 20 MB
-# DIVISION_FACTOR = 3
-# 320 MB 
-# 106,6 -> 107
-# img1%part%0%
-# img_01.jpg%part%001%
-# img1%part%2%
-
-# image_part_size = ceil(image_size // self.DIVISION_FACTOR)
-# selected_data_nodes = ...
-# 
-
-# 0 - 107 MB (64kb+..+...)
-# 107 - 214
-# 214 - 320
-
-# imagem: 1000 MB
-# chunk: 50 MB
-
-# 334 MB / 334 MB / 332 MB
-
-# 50 - 100 - 150 - 200 - 250 - 300 [334] 350 <-
-# 400 - 450 - 500 - 550 - 600 - 650 
-# 700 - 750 - 
-
-# 70 MB 50 MB 
+        # print('index_table:')
+        # for k, v in self.index_table.items():
+        #     print(f'{k}: {v}')
+        # print()

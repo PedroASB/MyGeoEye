@@ -32,7 +32,10 @@ class Client:
             print(f'[ERRO] Arquivo de imagem "{image_name}" não encontrado.')
             return
         image_size = os.path.getsize(image_path)
-        self.client_conn.root.init_upload_image_chunk(image_name, image_size)
+        attempt, error_msg = self.client_conn.root.init_upload_image_chunk(image_name, image_size)
+        if not attempt:
+            print(error_msg)
+            return
         with open(image_path, "rb") as file:
             while image_chunk := file.read(CHUNK_SIZE):
                 self.client_conn.root.upload_image_chunk(image_chunk)

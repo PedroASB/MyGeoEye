@@ -178,7 +178,8 @@ cython_debug/
 
 # Other
 .vscode/
-database_backup/
 database*/
+*database/
 client_images/
 cluster/
+test.py
