@@ -48,7 +48,7 @@ class Server(rpyc.Service):
         self.current_image_size_division = math.ceil(image_size / SHARD_SIZE)
         self.current_shard_index = 0
         self.current_shard_accumulated_size = 0
-        self.current_image_accumulated_size = 0   
+        self.current_image_accumulated_size = 0
         self.selected_nodes = {}
         
         if not self.cluster.init_update_index_table(self.current_image_name,
