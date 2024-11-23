@@ -22,7 +22,7 @@ class Server(rpyc.Service):
     def __init__(self):
         self.cluster = Cluster(self.DATA_NODES_ADDR, self.REPLICATION_FACTOR, SHARD_SIZE)
         self.cluster.connect_cluster()
-        print('[STATUS] Servidor inicializado com o cluster.')
+        print('\n[STATUS] Servidor inicializado com o cluster.')
         self.current_image_name = None
         self.current_image_size = None
         self.current_shard_index = None
@@ -41,13 +41,14 @@ class Server(rpyc.Service):
     def on_disconnect(self, conn):
         print("[STATUS] Cliente desconectado.")
 
+
     def exposed_init_upload_image_chunk(self, image_name, image_size):
         self.current_image_name = image_name
         self.current_image_size = image_size
         self.current_image_size_division = math.ceil(image_size / SHARD_SIZE)
         self.current_shard_index = 0
         self.current_shard_accumulated_size = 0
-        self.current_image_accumulated_size = 0        
+        self.current_image_accumulated_size = 0      
         self.selected_nodes = {}
         
         if not self.cluster.init_update_index_table(self.current_image_name,
@@ -146,7 +147,8 @@ class Server(rpyc.Service):
 
 
     def start(self):
-        threaded_server = ThreadedServer(service=Server, port=PORT_SERVER, protocol_config={'allow_public_attrs': True})
+        threaded_server = ThreadedServer(service=Server, port=PORT_SERVER,
+                                         protocol_config={'allow_public_attrs': True})
         threaded_server.start()
         print("[STATUS] Servidor iniciado.")
 

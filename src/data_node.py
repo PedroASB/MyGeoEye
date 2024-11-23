@@ -85,7 +85,8 @@ class DataNode(rpyc.Service):
     
     
     def start(self):
-        threaded_data_node = ThreadedServer(service=DataNode, port=PORT_DATA_NODE, protocol_config={'allow_public_attrs': True})
+        threaded_data_node = ThreadedServer(service=DataNode, port=PORT_DATA_NODE,
+                                            protocol_config={'allow_public_attrs': True})
         threaded_data_node.start()
         print("[STATUS] Data node iniciado.")
 
