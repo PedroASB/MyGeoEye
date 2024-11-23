@@ -7,14 +7,18 @@ PORT_SERVER = 5000
 CHUNK_SIZE = 65_536 # 64 KB
 
 class Client:
-    IMAGES_DIR = 'client_images'
+    UPLOAD_DIR = 'client_uploads'
+    DOWNLOAD_DIR = 'client_downloads'
 
     def __init__(self, ip=IP_SERVER, port=PORT_SERVER):
         self.ip = ip
         self.port = port
         self.client_conn = None
-        if not os.path.exists(self.IMAGES_DIR):
-            os.makedirs(self.IMAGES_DIR)
+        if not os.path.exists(self.UPLOAD_DIR):
+            os.makedirs(self.UPLOAD_DIR)
+        if not os.path.exists(self.DOWNLOAD_DIR):
+            os.makedirs(self.DOWNLOAD_DIR)
+        self.clear_donwload_dir()
 
 
     def on_connect(self, conn):
@@ -24,10 +28,18 @@ class Client:
     def on_disconnect(self, conn):
         pass
         
+    
+    def clear_donwload_dir(self):
+        """Remove todos os arquivos e subdiretórios do diretório de armazenamento."""
+        if os.path.exists(self.DOWNLOAD_DIR):
+            for root, dirs, files in os.walk(self.DOWNLOAD_DIR, topdown=False):
+                for file in files:
+                    os.remove(os.path.join(root, file))
+
 
     def upload_image(self, image_name):
         """Envia uma imagem para o servidor"""
-        image_path = os.path.join(self.IMAGES_DIR, image_name)
+        image_path = os.path.join(self.UPLOAD_DIR, image_name)
         if not os.path.exists(image_path):
             print(f'[ERRO] Arquivo de imagem "{image_name}" não encontrado.')
             return
@@ -43,11 +55,14 @@ class Client:
 
 
     def download_image(self, image_name):
+        image_path = os.path.join(self.DOWNLOAD_DIR, image_name)
+        if os.path.exists(image_path):
+            print(f'[ERRO] Arquivo de imagem "{image_name}" já existente.')
+            return
         attempt, error_msg, image_size = self.client_conn.root.init_download_image_chunk(image_name)
         if not attempt:
             print(error_msg)
             return
-        image_path = os.path.join(self.IMAGES_DIR, image_name)
         with open(image_path, 'ab') as file:
             received_size = 0
             while received_size < image_size:
@@ -56,7 +71,7 @@ class Client:
                     break
                 file.write(image_chunk)
                 received_size += len(image_chunk)
-        print(f'Imagem "{image_name}" armazenada com sucesso em "{self.IMAGES_DIR}/".')
+        print(f'Imagem "{image_name}" armazenada com sucesso em "{self.DOWNLOAD_DIR}/".')
 
 
     def list_images(self):

@@ -55,22 +55,25 @@ class DataNode(rpyc.Service):
         image_path = os.path.join(self.STORAGE_DIR, image_part_name)
         
         # Verificar se o arquivo já está aberto
-        if image_part not in self.open_files:
+        if image_part_name not in self.open_files:
             if not os.path.exists(image_path):
-                print(f"[ERRO] Parte da imagem '{image_part}' não encontrada.")
+                print(f"[ERRO] {image_name}%part{image_part}% não encontrada.")
                 return None
             # Abrir o arquivo e armazenar no mapeamento
-            self.open_files[image_part] = open(image_path, "rb")
+            self.open_files[image_part_name] = open(image_path, "rb")
 
-        file = self.open_files[image_part]
+        file = self.open_files[image_part_name]
         image_chunk = file.read(CHUNK_SIZE)
 
         # Se o arquivo terminou, feche-o e remova-o do mapeamento
         if not image_chunk:
             file.close()
-            del self.open_files[image_part]
-            print(f"[STATUS] Leitura da parte '{image_part}' concluída.")
+            del self.open_files[image_part_name]
+            print(f"[STATUS] Leitura de {image_name}%part{image_part}% concluída.")
             return None
+        
+        for of in self.open_files:
+            print(of)
         
         return image_chunk
 

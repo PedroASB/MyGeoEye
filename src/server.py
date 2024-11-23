@@ -103,24 +103,33 @@ class Server(rpyc.Service):
     def exposed_init_download_image_chunk(self, image_name):
         if image_name not in self.cluster.index_table:
             return False, f'[ERRO] A imagem "{image_name}" não existe', None
-        
+        self.current_image_name = image_name
         self.selected_nodes = self.cluster.select_nodes_to_retrieve(image_name)
         self.current_shard_index = 0
-
+        print(f'\n"{self.current_image_name}" - Parte {self.current_shard_index}')
+        print(f'Selected node: {self.selected_nodes[self.current_shard_index]}')
         return True, None, self.current_image_size
 
 
     def exposed_download_image_chunk(self):
+        image_chunk = self.fetch_image_chunk()
+
+        if not image_chunk:
+            self.current_shard_index += 1
+            print(f'\n"{self.current_image_name}" - Parte {self.current_shard_index}')
+            print(f'Selected node: {self.selected_nodes[self.current_shard_index]}')
+            if self.current_shard_index < len(self.selected_nodes):
+                image_chunk = self.fetch_image_chunk()
+        return image_chunk
+
+
+    def fetch_image_chunk(self):
         index = self.current_shard_index
         node_id = self.selected_nodes[index]
         node = self.cluster.data_nodes[node_id]
         image_chunk = node['conn'].root.retrieve_image_chunk(self.current_image_name, index)
-        if not image_chunk:
-            self.current_shard_index += 1
-            if self.current_shard_index < len(self.selected_nodes):
-                image_chunk = node['conn'].root.retrieve_image_chunk(self.current_image_name, index)
         return image_chunk
-
+        
 
     def exposed_list_images(self):
         """Lista todas as imagens que estão armazenadas"""

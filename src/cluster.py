@@ -92,7 +92,6 @@ class Cluster:
         for shard in self.index_table[image_name]:
             # shard => {'nodes': 3 2 4, 'size': 100}
             # sorted([(id, 5), (id, 3), (id, 2)])
-
             scored_nodes = [
                 node_id for node_id, _ in sorted(
                     ((node_id, self.calculate_score(node_id)) for node_id in shard['nodes']),
@@ -100,14 +99,10 @@ class Cluster:
                     reverse=True
                 )
             ]
-        print('retrieval_nodes =', retrieval_nodes)
-
-        
-        retrieval_nodes.append(scored_nodes[0])
-
+            retrieval_nodes.append(scored_nodes[0])
+        print(f'retrieval_nodes to "{image_name}" =', retrieval_nodes)
         return retrieval_nodes
     
-
 
     def image_total_size(self, image_name):
         total_size = 0
