@@ -98,7 +98,7 @@ class Server(rpyc.Service):
             node = self.cluster.data_nodes[node_id]
             node['conn'].root.store_image_chunk(self.current_image_name,
                                                 self.current_shard_index, image_chunk)
-            
+ 
 
     def exposed_init_download_image_chunk(self, image_name):
         if image_name not in self.cluster.index_table:
@@ -137,26 +137,25 @@ class Server(rpyc.Service):
 
     def exposed_list_images(self):
         """Lista todas as imagens que estão armazenadas"""
-        # for image_name in self.cluster.index_table:
-        #     return image_name
         return list(self.cluster.index_table.keys())
 
 
     def exposed_delete_image(self, image_name):
         """Deleta uma imagem"""
-        if image_name in self.cluster.index_table:
-            has_image = True
-            # img_01  ->  [[3 4], 1]
-            print(f'[INFO] Deletando a imagem {image_name} de: ', end='')
-            for node_id in self.cluster.index_table[image_name][0]:
+        if image_name not in self.cluster.index_table:
+            return False
+        # img_01  ->  [[part_0: {'nodes': 3 2 4, 'size': 100}, ...]
+        # self.index_table[image_name][shard_index]['nodes']
+        print(f'[INFO] Deletando a imagem {image_name}')
+        for shard_index, shard in enumerate(self.cluster.index_table[image_name]):
+            print(f'Delentando fragmento #{shard_index} de ', end='')
+            for node_id in shard['nodes']:
                 print(f'{node_id}', end=' ')
-                data_node_conn = self.cluster.data_nodes[node_id][1] # 3 4
-                data_node_conn.root.delete_image(image_name)
-            del self.cluster.index_table[image_name]
-        else:
-            has_image = False
-
-        return has_image
+                data_node_conn = self.cluster.data_nodes[node_id]['conn']
+                data_node_conn.root.delete_image(image_name, shard_index)
+            print()
+        del self.cluster.index_table[image_name]
+        return True
 
 
     def start(self):

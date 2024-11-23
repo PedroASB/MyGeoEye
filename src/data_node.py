@@ -15,6 +15,7 @@ class DataNode(rpyc.Service):
             os.makedirs(self.STORAGE_DIR)
         self.open_files = {}
 
+
     def exposed_clear_storage_dir(self):
         """Remove todos os arquivos e subdiretórios do diretório de armazenamento."""
         if os.path.exists(self.STORAGE_DIR):
@@ -22,6 +23,7 @@ class DataNode(rpyc.Service):
                 # Remove todos os arquivos
                 for file in files:
                     os.remove(os.path.join(root, file))
+
 
     def on_connect(self, conn):
         print("[STATUS] Data node conectado.")
@@ -39,54 +41,55 @@ class DataNode(rpyc.Service):
         return {'cpu': cpu_usage, 'memory': memory_info, 'disk': disk_info}
 
 
-    def exposed_store_image_chunk(self, image_name, image_part, image_chunk):
+    def exposed_store_image_chunk(self, image_name, shard_index, image_chunk):
         # Cria o diretório onde os chunks serão salvos, se necessário
-        image_part_name = f'{image_name}%part{image_part}%'
-        image_path = os.path.join(self.STORAGE_DIR, image_part_name)
+        image_shard_name = f'{image_name}%part{shard_index}%'
+        image_path = os.path.join(self.STORAGE_DIR, image_shard_name)
         # Armazena o chunk recebido
         with open(image_path, "ab") as file:
             file.write(image_chunk)
 
 
-    def exposed_retrieve_image_chunk(self, image_name, image_part):
+    def exposed_retrieve_image_chunk(self, image_name, shard_index):
         """
         Envia chunks de uma parte de imagem para o servidor de forma incremental.
         """
-        image_part_name = f'{image_name}%part{image_part}%'
-        image_path = os.path.join(self.STORAGE_DIR, image_part_name)
+        image_shard_name = f'{image_name}%part{shard_index}%'
+        image_path = os.path.join(self.STORAGE_DIR, image_shard_name)
         
         # Verificar se o arquivo já está aberto ou não
-        if image_part_name not in self.open_files:
+        if image_shard_name not in self.open_files:
             if not os.path.exists(image_path):
-                print(f"[ERRO] {image_name}%part{image_part}% não encontrada.")
+                print(f"[ERRO] {image_name}%part{shard_index}% não encontrada.")
                 return None
             # Abrir o arquivo e armazenar no mapeamento
-            self.open_files[image_part_name] = open(image_path, "rb")
+            self.open_files[image_shard_name] = open(image_path, "rb")
 
-        file = self.open_files[image_part_name]
+        file = self.open_files[image_shard_name]
         image_chunk = file.read(CHUNK_SIZE)
         eof = False
         
         # Significa que temos o último "chunk" ou vazio
         if len(image_chunk) < CHUNK_SIZE:
             file.close()
-            del self.open_files[image_part_name]
-            print(f"[STATUS] Leitura de {image_name}%part{image_part}% concluída.")
+            del self.open_files[image_shard_name]
+            print(f"[STATUS] Leitura de {image_name}%part{shard_index}% concluída.")
             eof = True
         
-        for of in self.open_files:
-            print(of)
+        # for of in self.open_files:
+        #     print(of)
         
         return image_chunk, eof
 
 
-    def exposed_delete_image(self, image_name):
-        image_path = os.path.join(self.STORAGE_DIR, image_name)
+    def exposed_delete_image(self, image_name, shard_index):
+        image_shard_name = f'{image_name}%part{shard_index}%'
+        image_path = os.path.join(self.STORAGE_DIR, image_shard_name)
         if os.path.exists(image_path):
             os.remove(image_path)
-            print(f'[STATUS] Imagem "{image_name}" deletada com sucesso.')
+            print(f'[STATUS] Fragmento de imagem "{image_shard_name}" deletado com sucesso.')
         else:
-            print(f'[STATUS] Imagem "{image_name}" não encontrada para deletar.')
+            print(f'[STATUS] Fragmento de imagem "{image_shard_name}" não encontrado para deletar.')
     
     
     def start(self):
