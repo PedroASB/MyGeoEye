@@ -63,11 +63,15 @@ class Client:
         if not attempt:
             print(error_msg)
             return
+        print(f'image_size = {image_size} ({(image_size / 2**10):.2f} KB)')
         with open(image_path, 'ab') as file:
             received_size = 0
             while received_size < image_size:
                 image_chunk = self.client_conn.root.download_image_chunk()
-                if not image_chunk:
+                if image_chunk == 'error':
+                    print('Erro!')
+                    break
+                if image_chunk is None:
                     break
                 file.write(image_chunk)
                 received_size += len(image_chunk)

@@ -48,7 +48,7 @@ class Server(rpyc.Service):
         self.current_image_size_division = math.ceil(image_size / SHARD_SIZE)
         self.current_shard_index = 0
         self.current_shard_accumulated_size = 0
-        self.current_image_accumulated_size = 0      
+        self.current_image_accumulated_size = 0   
         self.selected_nodes = {}
         
         if not self.cluster.init_update_index_table(self.current_image_name,
@@ -106,20 +106,24 @@ class Server(rpyc.Service):
         self.current_image_name = image_name
         self.selected_nodes = self.cluster.select_nodes_to_retrieve(image_name)
         self.current_shard_index = 0
+        self.current_image_size = self.cluster.image_total_size(image_name)
         print(f'\n"{self.current_image_name}" - Parte {self.current_shard_index}')
         print(f'Selected node: {self.selected_nodes[self.current_shard_index]}')
         return True, None, self.current_image_size
 
 
     def exposed_download_image_chunk(self):
-        image_chunk = self.fetch_image_chunk()
-
-        if not image_chunk:
-            self.current_shard_index += 1
-            print(f'\n"{self.current_image_name}" - Parte {self.current_shard_index}')
-            print(f'Selected node: {self.selected_nodes[self.current_shard_index]}')
-            if self.current_shard_index < len(self.selected_nodes):
-                image_chunk = self.fetch_image_chunk()
+        if self.current_shard_index < len(self.selected_nodes):
+            image_chunk, eof = self.fetch_image_chunk()
+            if eof:
+                self.current_shard_index += 1
+                if self.current_shard_index < len(self.selected_nodes):
+                    print(f'\n"{self.current_image_name}" - Parte {self.current_shard_index}')
+                    print(f'Selected node: {self.selected_nodes[self.current_shard_index]}')
+                    image_chunk, eof = self.fetch_image_chunk()
+        else:
+            return 'error'
+            
         return image_chunk
 
 
@@ -127,8 +131,8 @@ class Server(rpyc.Service):
         index = self.current_shard_index
         node_id = self.selected_nodes[index]
         node = self.cluster.data_nodes[node_id]
-        image_chunk = node['conn'].root.retrieve_image_chunk(self.current_image_name, index)
-        return image_chunk
+        image_chunk, eof = node['conn'].root.retrieve_image_chunk(self.current_image_name, index)
+        return image_chunk, eof
         
 
     def exposed_list_images(self):

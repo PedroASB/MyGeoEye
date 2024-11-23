@@ -100,7 +100,7 @@ class Cluster:
                 )
             ]
             retrieval_nodes.append(scored_nodes[0])
-        print(f'retrieval_nodes to "{image_name}" =', retrieval_nodes)
+        print(f'\nretrieval_nodes to "{image_name}" =', retrieval_nodes)
         return retrieval_nodes
     
 

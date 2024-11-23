@@ -1,5 +1,6 @@
 import rpyc
 import os
+import io
 import psutil
 from rpyc.utils.server import ThreadedServer
 
@@ -54,7 +55,7 @@ class DataNode(rpyc.Service):
         image_part_name = f'{image_name}%part{image_part}%'
         image_path = os.path.join(self.STORAGE_DIR, image_part_name)
         
-        # Verificar se o arquivo já está aberto
+        # Verificar se o arquivo já está aberto ou não
         if image_part_name not in self.open_files:
             if not os.path.exists(image_path):
                 print(f"[ERRO] {image_name}%part{image_part}% não encontrada.")
@@ -64,18 +65,19 @@ class DataNode(rpyc.Service):
 
         file = self.open_files[image_part_name]
         image_chunk = file.read(CHUNK_SIZE)
-
-        # Se o arquivo terminou, feche-o e remova-o do mapeamento
-        if not image_chunk:
+        eof = False
+        
+        # Significa que temos o último "chunk" ou vazio
+        if len(image_chunk) < CHUNK_SIZE:
             file.close()
             del self.open_files[image_part_name]
             print(f"[STATUS] Leitura de {image_name}%part{image_part}% concluída.")
-            return None
+            eof = True
         
         for of in self.open_files:
             print(of)
         
-        return image_chunk
+        return image_chunk, eof
 
 
     def exposed_delete_image(self, image_name):
