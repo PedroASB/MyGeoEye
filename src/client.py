@@ -63,7 +63,7 @@ class Client:
         if not attempt:
             print(error_msg)
             return
-        print(f'image_size = {image_size} ({(image_size / 2**10):.2f} KB)')
+        print(f'Tamanho total: {(image_size / 2**10):.2f} KB')
         with open(image_path, 'ab') as file:
             received_size = 0
             while received_size < image_size:

@@ -1,6 +1,12 @@
 import rpyc
 import time
+import pika
+import json
 
+# Configurações do RabbitMQ
+RABBITMQ_HOST = 'localhost'
+EXCHANGE_NAME = 'datanode_status'
+QUEUE_NAME = 'server_status_updates'
 STATUS_WEIGHTS = {"cpu": 0.3, "memory": 0.2, "disk": 0.5}
 BASE_SCORE = 50
 
@@ -17,13 +23,37 @@ class Cluster:
         self.data_nodes = {f'data_node_{i+1}': {
                                                 'addr': self.data_nodes_addresses[i], 
                                                 'conn': None, 
-                                                'status': {
-                                                    'cpu': None, 
-                                                    'memory': None, 
-                                                    'disk': None
-                                                    }
+                                                'online': None,
+                                                'score': None,
                                                 }
                                                 for i in range(self.cluster_size)}
+
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        self.channel = self.connection.channel()
+        self.channel.exchange_declare(exchange=EXCHANGE_NAME, exchange_type='fanout')
+
+        # Declaração da fila e ligação ao exchange
+        self.channel.queue_declare(queue=QUEUE_NAME)
+        self.channel.queue_bind(exchange=EXCHANGE_NAME, queue=QUEUE_NAME)
+        self.start_listening()
+
+
+    def callback(self, ch, method, properties, body):
+        """Callback para processar mensagens do RabbitMQ."""
+        message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
+        print(f"[Server] Notificação recebida: {message_dict}")
+        # Acessar informações
+        node_id = message_dict["node_id"]
+        status = message_dict["status"]
+        print(f"Node {node_id} está {status}")
+
+        self.data_nodes[node_id]['status'] = status
+
+
+    def start_listening(self):
+        print("[Server] Aguardando notificações do Monitor...")
+        self.channel.basic_consume(queue=QUEUE_NAME, on_message_callback=self.callback, auto_ack=True)
+        self.channel.start_consuming()
 
 
     def connect_cluster(self):
@@ -33,6 +63,7 @@ class Cluster:
             # value: ((IP, PORT), socket)
             # self.data_node_id['data_node_3'][1] = self.connect_data_node(('1.1.1.1', '8003'))
             self.data_nodes[key]['conn'] = self.connect_data_node(value['addr'])
+            self.data_nodes[key]['online'] = True
         print('[STATUS] Todos os data nodes do cluster foram conectados com sucesso.')
 
 
@@ -55,15 +86,17 @@ class Cluster:
 
     def calculate_score(self, node_id):
         """Função para calcular o score com base nos recursos disponíveis"""
-        # return 50
         data_node_conn = self.data_nodes[node_id]['conn']
-        self.data_nodes[node_id]['status'] = data_node_conn.root.get_node_status()
-        cpu, memory, disk = list(self.data_nodes[node_id]['status'].values())
-        return (
+        node_resources = data_node_conn.root.get_node_status()
+        cpu, memory, disk = list(node_resources.values())
+        score = (
             (100 - cpu)    * STATUS_WEIGHTS['cpu'] +
             (100 - memory) * STATUS_WEIGHTS['memory'] +
             (100 - disk)   * STATUS_WEIGHTS['disk']
         )
+        self.data_nodes[node_id]['score'] = score
+        print(f'{node_id}: {score}')
+        return score
 
 
     def select_nodes_to_store(self):
@@ -71,10 +104,13 @@ class Cluster:
         Seleciona os data nodes para armazenamento de imagens
         Utiliza-se balanceamento de carga pelos recursos de máquina
         """
-        scored_nodes = [
-            (node_id, self.calculate_score(node_id))
-            for node_id in self.data_nodes
-        ]
+        # scored_nodes = [
+        #     (node_id, self.calculate_score(node_id))
+        #     for node_id in self.data_nodes
+        # ]
+        scored_nodes = [node_id for node_id in self.data_nodes if \
+                        self.data_nodes[node_id]['online'] and \
+                        self.data_nodes[node_id]['score'] >= BASE_SCORE]
         scored_nodes.sort(key=lambda x: x[1], reverse=True)
         storage_nodes = [node for node, score in scored_nodes if score >= BASE_SCORE]
         if len(storage_nodes) < self.replication_factor:
