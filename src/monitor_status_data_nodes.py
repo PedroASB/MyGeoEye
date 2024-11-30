@@ -8,7 +8,7 @@ from addresses import*
 RABBITMQ_HOST = 'localhost'
 EXCHANGE_NAME = 'datanode_status'
 ROUTING_KEY = 'status_update'
-DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, 
+DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR,
                    DATA_NODE_3_ADDR, DATA_NODE_4_ADDR]
 
 

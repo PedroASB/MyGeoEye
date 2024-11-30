@@ -12,11 +12,10 @@ BASE_SCORE = 50
 
 class Cluster:
 
-    def __init__(self, data_nodes_addresses, replication_factor, division_factor):
+    def __init__(self, data_nodes_addresses, replication_factor):
         self.data_nodes_addresses = data_nodes_addresses
         self.replication_factor = replication_factor
-        self.division_factor = division_factor
-        # self.data_nodes = {f'data_node_{i+1}': [self.data_nodes[i], None] for i in range(self.cluster_size)}
+        # self.division_factor = division_factor
         self.cluster_size = len(data_nodes_addresses)
         self.current_node_to_store = 1
         self.index_table = {}
@@ -28,14 +27,14 @@ class Cluster:
                                                 }
                                                 for i in range(self.cluster_size)}
 
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
-        self.channel = self.connection.channel()
-        self.channel.exchange_declare(exchange=EXCHANGE_NAME, exchange_type='fanout')
+        # self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        # self.channel = self.connection.channel()
+        # self.channel.exchange_declare(exchange=EXCHANGE_NAME, exchange_type='fanout')
 
-        # Declaração da fila e ligação ao exchange
-        self.channel.queue_declare(queue=QUEUE_NAME)
-        self.channel.queue_bind(exchange=EXCHANGE_NAME, queue=QUEUE_NAME)
-        self.start_listening()
+        # # Declaração da fila e ligação ao exchange
+        # self.channel.queue_declare(queue=QUEUE_NAME)
+        # self.channel.queue_bind(exchange=EXCHANGE_NAME, queue=QUEUE_NAME)
+        # self.start_listening()
 
 
     def callback(self, ch, method, properties, body):

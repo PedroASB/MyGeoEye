@@ -1,24 +1,29 @@
+import sys
 import rpyc
 import time
 import os
 
-IP_SERVER = "localhost"
-PORT_SERVER = 5000
+# Servidor
+NAME_SERVER = 'geoeye_images'
+
+# Serviço de nomes
+HOST_NAME_SERVICE = 'localhost'
+PORT_NAME_SERVICE = 6000
+
+# Tamanho de chunks
 CHUNK_SIZE = 65_536 # 64 KB
 
 class Client:
     UPLOAD_DIR = 'client_uploads'
     DOWNLOAD_DIR = 'client_downloads'
 
-    def __init__(self, ip=IP_SERVER, port=PORT_SERVER):
-        self.ip = ip
-        self.port = port
-        self.client_conn = None
+    def __init__(self):
+        self.server_conn = None
         if not os.path.exists(self.UPLOAD_DIR):
             os.makedirs(self.UPLOAD_DIR)
         if not os.path.exists(self.DOWNLOAD_DIR):
             os.makedirs(self.DOWNLOAD_DIR)
-        self.clear_donwload_dir()
+        self.clear_donwload_dir() # temporário
 
 
     def on_connect(self, conn):
@@ -44,13 +49,13 @@ class Client:
             print(f'[ERRO] Arquivo de imagem "{image_name}" não encontrado.')
             return
         image_size = os.path.getsize(image_path)
-        attempt, error_msg = self.client_conn.root.init_upload_image_chunk(image_name, image_size)
+        attempt, error_msg = self.server_conn.root.init_upload_image_chunk(image_name, image_size)
         if not attempt:
             print(error_msg)
             return
         with open(image_path, "rb") as file:
             while image_chunk := file.read(CHUNK_SIZE):
-                self.client_conn.root.upload_image_chunk(image_chunk)
+                self.server_conn.root.upload_image_chunk(image_chunk)
         print(f'[STATUS] Imagem "{image_name}" enviada ao servidor.')
 
 
@@ -59,7 +64,7 @@ class Client:
         if os.path.exists(image_path):
             print(f'[ERRO] Arquivo de imagem "{image_name}" já existente.')
             return
-        attempt, error_msg, image_size = self.client_conn.root.init_download_image_chunk(image_name)
+        attempt, error_msg, image_size = self.server_conn.root.init_download_image_chunk(image_name)
         if not attempt:
             print(error_msg)
             return
@@ -67,7 +72,7 @@ class Client:
         with open(image_path, 'ab') as file:
             received_size = 0
             while received_size < image_size:
-                image_chunk = self.client_conn.root.download_image_chunk()
+                image_chunk = self.server_conn.root.download_image_chunk()
                 if image_chunk == 'error':
                     print('Erro!')
                     break
@@ -79,7 +84,7 @@ class Client:
 
 
     def list_images(self):
-        images_list = self.client_conn.root.list_images()
+        images_list = self.server_conn.root.list_images()
         if len(images_list) == 0:
             print('\nNão há imagens armazenadas.')
         else:
@@ -90,22 +95,38 @@ class Client:
 
     def delete_image(self, image_name):
         """Deleta uma imagem"""
-        if self.client_conn.root.delete_image(image_name):
+        if self.server_conn.root.delete_image(image_name):
             print(f'[STATUS] Imagem "{image_name}" deletada no servidor.')
         else:
             print('[ERRO] Imagem não encontrada no servidor.')
     
-    
-    def start(self):
-        while not self.client_conn:
+
+    def start(self, name_server):
+        try:
+            name_service_conn = rpyc.connect(HOST_NAME_SERVICE, PORT_NAME_SERVICE)
+        except ConnectionRefusedError:
+            print('[ERRO] Não foi possível estabelecer conexão com o serviço de nomes.')
+            return False
+        
+        if not (server_registry := name_service_conn.root.lookup(name_server)):
+            print(f'[ERRO] Servidor "{name_server}" não registrado no serviço de nomes.')
+            return False
+        
+        host_server, port_server = server_registry
+        while not self.server_conn:
             try:
-                self.client_conn = rpyc.connect(self.ip, self.port)
+                self.server_conn = rpyc.connect(host_server, port_server)
                 print('[STATUS] Conexão com servidor estabelecida.')
+                return True
             except ConnectionRefusedError:
                 print("[STATUS] Conexão recusada. Tentando novamente em 5 segundos...")
-                self.client_conn = None
+                self.server_conn = None
                 time.sleep(5)
 
+
+    def handle_commands(self):
+        if not self.server_conn:
+            return
         while True:
             print('\nSelecione um comando:')
             print('1 - Enviar imagem')
@@ -118,27 +139,25 @@ class Client:
                 case '1':
                     image_name = str(input('\nImagem a ser enviada: ')).strip()
                     self.upload_image(image_name)
-                    
                 case '2':
                     image_name = str(input('\nImagem a ser baixada: ')).strip()
                     self.download_image(image_name)
-
                 case '3':
                     self.list_images()
-
                 case '4':
                     image_name = str(input('\nImagem a ser deletada: ')).strip()
                     self.delete_image(image_name)
-
                 case '0':
                     break
-
                 case _:
                     print('\n[ERRO] Comando inválido.')
-        self.client_conn.close()
-        # print('[STATUS] Conexão encerrada.')
+        self.server_conn.close()
+        print('\n[STATUS] Conexão com o servidor encerrada.')
 
 
 if __name__ == "__main__":
     client = Client()
-    client.start()
+    if client.start(name_server=NAME_SERVER):
+        client.handle_commands()
+    else:
+        sys.exit(0)
