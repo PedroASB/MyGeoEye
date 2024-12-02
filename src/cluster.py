@@ -2,12 +2,14 @@ import rpyc
 import time
 import pika
 import json
+import threading
 
 # Configurações do RabbitMQ
 RABBITMQ_HOST = 'localhost'
 EXCHANGE_NAME = 'datanode_status'
-QUEUE_NAME = 'server_status_updates'
-STATUS_WEIGHTS = {"cpu": 0.3, "memory": 0.2, "disk": 0.5}
+QUEUE_NAME_SCORE_DATA_NODE = 'queue_monitor_score_data_node'
+QUEUE_NAME_STATUS_DATA_NODE = 'queue_monitor_status_data_node'
+
 BASE_SCORE = 50
 
 class Cluster:
@@ -27,17 +29,41 @@ class Cluster:
                                                 }
                                                 for i in range(self.cluster_size)}
 
-        # self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
-        # self.channel = self.connection.channel()
-        # self.channel.exchange_declare(exchange=EXCHANGE_NAME, exchange_type='fanout')
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        self.channel = self.connection.channel()
+        
+        # Declaração do exchange
+        self.channel.exchange_declare(exchange=EXCHANGE_NAME, exchange_type='fanout')
 
-        # # Declaração da fila e ligação ao exchange
-        # self.channel.queue_declare(queue=QUEUE_NAME)
-        # self.channel.queue_bind(exchange=EXCHANGE_NAME, queue=QUEUE_NAME)
+        # Declaração das filas e ligação ao exchange
+        self.channel.queue_declare(queue=QUEUE_NAME_SCORE_DATA_NODE)
+        self.channel.queue_bind(exchange=EXCHANGE_NAME, queue=QUEUE_NAME_SCORE_DATA_NODE)
+
+        self.channel.queue_declare(queue=QUEUE_NAME_STATUS_DATA_NODE)
+        self.channel.queue_bind(exchange=EXCHANGE_NAME, queue=QUEUE_NAME_STATUS_DATA_NODE)
         # self.start_listening()
+        thread = threading.Thread(target=self.start_listening)
+        #thread_2 = threading.Thread(target=self.listen_queue_2)
+        thread.start()
+        thread.join()
+    
+
+    def exposed_get_data_nodes_addresses(self):
+        return self.data_nodes_addresses
 
 
-    def callback(self, ch, method, properties, body):
+    def callback_score_data_node(self, ch, method, properties, body):
+        """Callback para processar mensagens do RabbitMQ."""
+        message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
+        print(f"[MONITOR] Notificação recebida: {message_dict}")
+        # Acessar informações
+        print('message_dict = ', message_dict)
+        for node_id, score in message_dict.items():
+            self.data_nodes[node_id]['score'] = score
+            print(f'Data node "{node_id}" tem score de: {score:.3f}')
+
+
+    def callback_status_data_node(self, ch, method, properties, body):
         """Callback para processar mensagens do RabbitMQ."""
         message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
         print(f"[Server] Notificação recebida: {message_dict}")
@@ -50,8 +76,8 @@ class Cluster:
 
 
     def start_listening(self):
-        print("[Server] Aguardando notificações do Monitor...")
-        self.channel.basic_consume(queue=QUEUE_NAME, on_message_callback=self.callback, auto_ack=True)
+        self.channel.basic_consume(queue=QUEUE_NAME_SCORE_DATA_NODE, on_message_callback=self.callback_score_data_node, auto_ack=True)
+        self.channel.basic_consume(queue=QUEUE_NAME_STATUS_DATA_NODE, on_message_callback=self.callback_status_data_node, auto_ack=True)
         self.channel.start_consuming()
 
 
@@ -71,31 +97,31 @@ class Cluster:
         ip, port = address[0], address[1]
         while not data_node_conn:
             try:
-                print(f"[STATUS] Tentando conectar ao data node em {ip}:{port}...")
+                print(f"[STATUS] Tentando conectar ao data node em {ip}:{port}.")
                 data_node_conn = rpyc.connect(ip, port)
                 print(f"[STATUS] Conexão com o data node estabelecida em {ip}:{port}.")
                 # TODO: tirar isso:
                 data_node_conn.root.clear_storage_dir()
             except ConnectionRefusedError:
-                print("[STATUS] Conexão recusada. Tentando novamente em 5 segundos...")
+                print("[STATUS] Conexão recusada. Tentando novamente em 5 segundos.")
                 data_node_conn = None
                 time.sleep(5)
         return data_node_conn
     
 
-    def calculate_score(self, node_id):
-        """Função para calcular o score com base nos recursos disponíveis"""
-        data_node_conn = self.data_nodes[node_id]['conn']
-        node_resources = data_node_conn.root.get_node_status()
-        cpu, memory, disk = list(node_resources.values())
-        score = (
-            (100 - cpu)    * STATUS_WEIGHTS['cpu'] +
-            (100 - memory) * STATUS_WEIGHTS['memory'] +
-            (100 - disk)   * STATUS_WEIGHTS['disk']
-        )
-        self.data_nodes[node_id]['score'] = score
-        print(f'{node_id}: {score}')
-        return score
+    # def calculate_score(self, node_id):
+    #     """Função para calcular o score com base nos recursos disponíveis"""
+    #     data_node_conn = self.data_nodes[node_id]['conn']
+    #     node_resources = data_node_conn.root.get_node_status()
+    #     cpu, memory, disk = list(node_resources.values())
+    #     score = (
+    #         (100 - cpu)    * STATUS_WEIGHTS['cpu'] +
+    #         (100 - memory) * STATUS_WEIGHTS['memory'] +
+    #         (100 - disk)   * STATUS_WEIGHTS['disk']
+    #     )
+    #     self.data_nodes[node_id]['score'] = score
+    #     print(f'{node_id}: {score}')
+    #     return score
 
 
     def select_nodes_to_store(self):
@@ -129,7 +155,7 @@ class Cluster:
             # sorted([(id, 5), (id, 3), (id, 2)])
             scored_nodes = [
                 node_id for node_id, _ in sorted(
-                    ((node_id, self.calculate_score(node_id)) for node_id in shard['nodes']),
+                    ((node_id, self.data_nodes[node_id]['score']) for node_id in shard['nodes']),
                     key=lambda x: x[1],
                     reverse=True
                 )

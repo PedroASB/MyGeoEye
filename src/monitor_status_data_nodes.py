@@ -2,23 +2,23 @@ import pika
 import time
 import rpyc
 import json
-from addresses import*
-
+from addresses import *
 
 RABBITMQ_HOST = 'localhost'
-EXCHANGE_NAME = 'datanode_status'
-ROUTING_KEY = 'status_update'
-DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR,
-                   DATA_NODE_3_ADDR, DATA_NODE_4_ADDR]
+QUEUE_NAME = 'queue_monitor_status_data_node'  # Nome da fila específica para este monitor
+DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR]
 
 
-class Monitor:
+class MonitorStatus:
     def __init__(self):
         self.data_nodes = DATA_NODES_ADDR
-        self.status = {f"data_node_{i+1}": True for i in range(len(DATA_NODES_ADDR))}
+        self.cluster_size = len(DATA_NODES_ADDR)
+        self.status = {f"data_node_{i+1}": True for i in range(self.cluster_size)}
         self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
         self.channel = self.connection.channel()
-        self.channel.exchange_declare(exchange=EXCHANGE_NAME, exchange_type='fanout')
+        
+        # Declara a fila única para este monitor
+        self.channel.queue_declare(queue=QUEUE_NAME)
         self.offline_nodes = []
 
 
@@ -34,7 +34,7 @@ class Monitor:
                     if node_id in self.offline_nodes:
                         self.offline_nodes.remove(node_id)
                         self.notify_server(node_id, self.status[node_id])
-                    
+
             except ConnectionRefusedError:
                 if self.status[node_id]:
                     self.status[node_id] = False
@@ -51,9 +51,9 @@ class Monitor:
         # Serializa o dicionário para uma string JSON
         message_json = json.dumps(message_dict)
         
-        # Publica a string JSON no RabbitMQ
-        self.channel.basic_publish(exchange=EXCHANGE_NAME, routing_key=ROUTING_KEY, body=message_json)
-        print(f"[Monitor] Notificação enviada: {message_json}")
+        # Publica a string JSON na fila específica deste monitor
+        self.channel.basic_publish(exchange='', routing_key=QUEUE_NAME, body=message_json)
+        print(f"[Monitor] Notificação enviada para {QUEUE_NAME}: {message_json}")
 
 
     def start_monitoring(self):
@@ -69,5 +69,5 @@ class Monitor:
 
 
 if __name__ == "__main__":
-    monitor = Monitor()
+    monitor = MonitorStatus()
     monitor.start_monitoring()

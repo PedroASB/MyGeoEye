@@ -26,11 +26,11 @@ class DataNode(rpyc.Service):
 
 
     def on_connect(self, conn):
-        print("[STATUS] Data node conectado.")
+        pass
 
 
     def on_disconnect(self, conn):
-        print("[STATUS] Data node desconectado.")
+        pass
 
 
     def exposed_get_node_status(self):

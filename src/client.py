@@ -119,7 +119,7 @@ class Client:
                 print('[STATUS] Conexão com servidor estabelecida.')
                 return True
             except ConnectionRefusedError:
-                print("[STATUS] Conexão recusada. Tentando novamente em 5 segundos...")
+                print("[STATUS] Conexão recusada. Tentando novamente em 5 segundos.")
                 self.server_conn = None
                 time.sleep(5)
 
