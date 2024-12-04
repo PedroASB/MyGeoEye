@@ -10,7 +10,7 @@ EXCHANGE_NAME = 'datanode_status'
 QUEUE_NAME_SCORE_DATA_NODE = 'queue_monitor_score_data_node'
 QUEUE_NAME_STATUS_DATA_NODE = 'queue_monitor_status_data_node'
 
-BASE_SCORE = 50
+BASE_SCORE = 42
 
 class Cluster:
 
@@ -41,11 +41,6 @@ class Cluster:
 
         self.channel.queue_declare(queue=QUEUE_NAME_STATUS_DATA_NODE)
         self.channel.queue_bind(exchange=EXCHANGE_NAME, queue=QUEUE_NAME_STATUS_DATA_NODE)
-        # self.start_listening()
-        thread = threading.Thread(target=self.start_listening)
-        #thread_2 = threading.Thread(target=self.listen_queue_2)
-        thread.start()
-        thread.join()
     
 
     def exposed_get_data_nodes_addresses(self):
@@ -57,10 +52,9 @@ class Cluster:
         message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
         print(f"[MONITOR] Notificação recebida: {message_dict}")
         # Acessar informações
-        print('message_dict = ', message_dict)
         for node_id, score in message_dict.items():
             self.data_nodes[node_id]['score'] = score
-            print(f'Data node "{node_id}" tem score de: {score:.3f}')
+            print(f'Data node "{node_id}" tem score de: {score}')
 
 
     def callback_status_data_node(self, ch, method, properties, body):
@@ -137,9 +131,9 @@ class Cluster:
                         self.data_nodes[node_id]['online'] and \
                         self.data_nodes[node_id]['score'] >= BASE_SCORE]
         scored_nodes.sort(key=lambda x: x[1], reverse=True)
-        storage_nodes = [node for node, score in scored_nodes if score >= BASE_SCORE]
+        storage_nodes = [node_id for node_id in scored_nodes]
         if len(storage_nodes) < self.replication_factor:
-            storage_nodes = [node for node, _ in scored_nodes[:self.replication_factor]]
+            storage_nodes = [node_id for node_id, _ in scored_nodes[:self.replication_factor]]
         return storage_nodes
 
 

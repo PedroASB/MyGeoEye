@@ -1,6 +1,7 @@
 import sys
 import rpyc
 import math
+import threading
 from itertools import cycle, islice
 from rpyc.utils.server import ThreadedServer
 from cluster import *
@@ -42,8 +43,8 @@ class Server(rpyc.Service):
         self.port = port
         self.cluster = cluster
         self.replication_factor = self.cluster.replication_factor
-        # self.cluster.connect_cluster()
-        # print('\n[STATUS] Servidor inicializado com o cluster.')
+        self.cluster.connect_cluster()
+        print('\n[STATUS] Servidor inicializado com o cluster.')
 
 
     def on_connect(self, conn):
@@ -179,7 +180,32 @@ class Server(rpyc.Service):
         return True
 
 
+    # def start(self):
+    #     t = ThreadedServer(service=self, port=self.port,
+    #                        protocol_config={'allow_public_attrs': True})
+    #     # self.start_listening()
+    #     thread = threading.Thread(target=self.cluster.start_listening)
+    #     #thread_2 = threading.Thread(target=self.listen_queue_2)
+    #     thread.start()
+    #     thread.join()
+    #     print(f'[STATUS] Servidor iniciado na porta {self.port}.')
+    #     t.start()
+
+
     def start(self):
+        server_thread = threading.Thread(target=self.start_server)
+        cluster_thread = threading.Thread(target=self.cluster.start_listening)
+
+        # Inicia as threads
+        cluster_thread.start()
+        server_thread.start()
+
+        # Aguarda as threads finalizarem
+        cluster_thread.join()
+        server_thread.join()
+
+
+    def start_server(self):
         t = ThreadedServer(service=self, port=self.port,
                            protocol_config={'allow_public_attrs': True})
         print(f'[STATUS] Servidor iniciado na porta {self.port}.')

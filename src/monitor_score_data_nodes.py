@@ -7,7 +7,7 @@ from addresses import *
 RABBITMQ_HOST = 'localhost'
 QUEUE_NAME = 'queue_monitor_score_data_node'  # Nome da fila específica para este monitor
 DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR]
-VERIFICATION_INTERVAL = 5 # Tempo em segundos entre cada verificação
+VERIFICATION_INTERVAL = 20 # Tempo em segundos entre cada verificação
 
 STATUS_WEIGHTS = {"cpu": 0.3, "memory": 0.2, "disk": 0.5}
 
