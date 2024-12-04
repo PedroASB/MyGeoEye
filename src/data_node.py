@@ -1,11 +1,58 @@
 import rpyc
 import os
 import io
+import time
+import pika
+import json
 import psutil
+import threading
 from rpyc.utils.server import ThreadedServer
+
 
 PORT_DATA_NODE = 8000
 CHUNK_SIZE = 65_536 # 64 KB
+NAME_DATA_NODE = 'data_node'
+
+
+class Pub:
+    RABBITMQ_HOST = 'localhost'
+    QUEUE_STATUS_DATA_NODE = 'queue_status_data_node'  # Nome da fila específica para este data node
+    VERIFICATION_INTERVAL = 20 # Tempo em segundos entre cada verificação
+
+    def __init__(self):
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.RABBITMQ_HOST))
+        self.channel = self.connection.channel()
+        # Declara a fila única para este monitor
+        self.channel.queue_declare(queue=self.QUEUE_STATUS_DATA_NODE)
+
+
+    def start_monitoring(self):
+        print("[STATUS] Iniciando monitoramento dos data nodes.")
+        try:
+            while True:
+                self.notify_monitor_score()
+                time.sleep(self.VERIFICATION_INTERVAL)  # Intervalo entre as verificações
+        except KeyboardInterrupt:
+            print("[STATUS] Encerrando monitoramento.")
+            self.connection.close()
+
+
+    def notify_monitor_score(self):
+        message_dict = self.get_node_status()
+        message_dict['node_id'] = NAME_DATA_NODE
+        message_json = json.dumps(message_dict)
+        
+        self.channel.basic_publish(exchange='', routing_key=self.QUEUE_STATUS_DATA_NODE, body=message_json)
+        print(f"[INFO] Notificação enviada para {self.QUEUE_STATUS_DATA_NODE}: {message_json}")
+
+
+    def get_node_status(self):
+        """Retorna o status dos recursos do nó."""
+        cpu_usage = psutil.cpu_percent(interval=1)
+        memory_info = psutil.virtual_memory().percent
+        disk_info =  psutil.disk_usage('/').percent
+        return {'cpu': cpu_usage, 'memory': memory_info, 'disk': disk_info}
+
 
 class DataNode(rpyc.Service):
     STORAGE_DIR = 'data_node_storage'
@@ -14,7 +61,8 @@ class DataNode(rpyc.Service):
         if not os.path.exists(self.STORAGE_DIR):
             os.makedirs(self.STORAGE_DIR)
         self.open_files = {}
-
+        self.pub = Pub()
+    
 
     def exposed_clear_storage_dir(self):
         """Remove todos os arquivos e subdiretórios do diretório de armazenamento."""
@@ -23,22 +71,6 @@ class DataNode(rpyc.Service):
                 # Remove todos os arquivos
                 for file in files:
                     os.remove(os.path.join(root, file))
-
-
-    def on_connect(self, conn):
-        pass
-
-
-    def on_disconnect(self, conn):
-        pass
-
-
-    def exposed_get_node_status(self):
-        """Retorna o status dos recursos do nó."""
-        cpu_usage = psutil.cpu_percent(interval=1)
-        memory_info = psutil.virtual_memory().percent
-        disk_info =  psutil.disk_usage('/').percent
-        return {'cpu': cpu_usage, 'memory': memory_info, 'disk': disk_info}
 
 
     def exposed_store_image_chunk(self, image_name, shard_index, image_chunk):
@@ -90,15 +122,28 @@ class DataNode(rpyc.Service):
             print(f'[STATUS] Fragmento de imagem "{image_shard_name}" deletado com sucesso.')
         else:
             print(f'[STATUS] Fragmento de imagem "{image_shard_name}" não encontrado para deletar.')
-    
-    
+
+
     def start(self):
+        main_thread = threading.Thread(target=self.start_data_node)
+        monitoring_thread = threading.Thread(target=self.pub.start_monitoring)
+
+        # Inicia as threads
+        monitoring_thread.start()
+        main_thread.start()
+
+        # Aguarda as threads finalizarem
+        monitoring_thread.join()
+        main_thread.join()
+
+
+    def start_data_node(self):
         threaded_data_node = ThreadedServer(service=self,
                                             port=PORT_DATA_NODE,
                                             protocol_config={'allow_public_attrs': True})
         print(f'[STATUS] Data node iniciado na porta {PORT_DATA_NODE}.')
         threaded_data_node.start()
-
+        
 
 if __name__ == "__main__":
     data_node = DataNode()

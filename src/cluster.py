@@ -6,7 +6,7 @@ import threading
 
 # Configurações do RabbitMQ
 RABBITMQ_HOST = 'localhost'
-EXCHANGE_NAME = 'datanode_status'
+EXCHANGE_NAME = 'datanode_score'
 QUEUE_NAME_SCORE_DATA_NODE = 'queue_monitor_score_data_node'
 QUEUE_NAME_STATUS_DATA_NODE = 'queue_monitor_status_data_node'
 
