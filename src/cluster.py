@@ -2,15 +2,68 @@ import rpyc
 import time
 import pika
 import json
-import threading
 
 # Configurações do RabbitMQ
 RABBITMQ_HOST = 'localhost'
-EXCHANGE_NAME = 'datanode_score'
-QUEUE_NAME_SCORE_DATA_NODE = 'queue_monitor_score_data_node'
-QUEUE_NAME_STATUS_DATA_NODE = 'queue_monitor_status_data_node'
-
 BASE_SCORE = 42
+
+class SubScore:
+    EXCHANGE_MONITOR_DATA_NODE_SCORES = 'exchange_monitor_data_node_scores'
+    QUEUE_MONITOR_DATA_NODE_SCORES = 'queue_monitor_data_node_scores'
+
+    def __init__(self, data_nodes):
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        self.channel = self.connection.channel()
+        self.channel.exchange_declare(exchange=self.EXCHANGE_MONITOR_DATA_NODE_SCORES, exchange_type='fanout')
+        self.channel.queue_declare(queue=self.QUEUE_MONITOR_DATA_NODE_SCORES)
+        self.channel.queue_bind(exchange=self.EXCHANGE_MONITOR_DATA_NODE_SCORES, queue=self.QUEUE_MONITOR_DATA_NODE_SCORES)
+        self.data_nodes = data_nodes
+
+
+    def callback_data_nodes_scores(self, ch, method, properties, body):
+        """Callback para processar mensagens do RabbitMQ."""
+        message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
+        print(f"[MONITOR] Notificação recebida: {message_dict}")
+        # Acessar informações
+        for node_id, score in message_dict.items():
+            self.data_nodes[node_id]['score'] = score
+            print(f'Data node "{node_id}" tem score de: {score}')
+    
+
+    def start_listening_sub_score(self):
+        self.channel.basic_consume(queue=self.QUEUE_MONITOR_DATA_NODE_SCORES, on_message_callback=self.callback_data_nodes_scores, auto_ack=True)
+        self.channel.start_consuming()
+
+
+class SubStatus:
+    EXCHANGE_MONITOR_DATA_NODE_STATUS = 'exchange_monitor_data_node_status'
+    QUEUE_MONITOR_DATA_NODE_STATUS = 'queue_monitor_data_node_status'
+
+    def __init__(self, data_nodes):
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        self.channel = self.connection.channel()
+        self.channel.exchange_declare(exchange=self.EXCHANGE_MONITOR_DATA_NODE_STATUS, exchange_type='fanout')
+        self.channel.queue_declare(queue=self.QUEUE_MONITOR_DATA_NODE_STATUS)
+        self.channel.queue_bind(exchange=self.EXCHANGE_MONITOR_DATA_NODE_STATUS, queue=self.QUEUE_MONITOR_DATA_NODE_STATUS)
+        self.data_nodes = data_nodes
+    
+
+    def callback_data_node_status(self, ch, method, properties, body):
+        """Callback para processar mensagens do RabbitMQ."""
+        message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
+        print(f"[Server] Notificação recebida: {message_dict}")
+        # Acessar informações
+        node_id = message_dict["node_id"]
+        status = message_dict["online"]
+        print(f"Node {node_id} está {status}")
+
+        self.data_nodes[node_id]['online'] = status
+    
+
+    def start_listening_sub_status(self):
+        self.channel.basic_consume(queue=self.QUEUE_MONITOR_DATA_NODE_STATUS, on_message_callback=self.callback_data_node_status, auto_ack=True)
+        self.channel.start_consuming()
+
 
 class Cluster:
 
@@ -28,59 +81,17 @@ class Cluster:
                                                 'score': None,
                                                 }
                                                 for i in range(self.cluster_size)}
-
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
-        self.channel = self.connection.channel()
-        
-        # Declaração do exchange
-        self.channel.exchange_declare(exchange=EXCHANGE_NAME, exchange_type='fanout')
-
-        # Declaração das filas e ligação ao exchange
-        self.channel.queue_declare(queue=QUEUE_NAME_SCORE_DATA_NODE)
-        self.channel.queue_bind(exchange=EXCHANGE_NAME, queue=QUEUE_NAME_SCORE_DATA_NODE)
-
-        self.channel.queue_declare(queue=QUEUE_NAME_STATUS_DATA_NODE)
-        self.channel.queue_bind(exchange=EXCHANGE_NAME, queue=QUEUE_NAME_STATUS_DATA_NODE)
+        self.subScore = SubScore(self.data_nodes)
+        self.subStatus = SubStatus(self.data_nodes)
     
 
     def exposed_get_data_nodes_addresses(self):
         return self.data_nodes_addresses
 
 
-    def callback_score_data_node(self, ch, method, properties, body):
-        """Callback para processar mensagens do RabbitMQ."""
-        message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
-        print(f"[MONITOR] Notificação recebida: {message_dict}")
-        # Acessar informações
-        for node_id, score in message_dict.items():
-            self.data_nodes[node_id]['score'] = score
-            print(f'Data node "{node_id}" tem score de: {score}')
-
-
-    def callback_status_data_node(self, ch, method, properties, body):
-        """Callback para processar mensagens do RabbitMQ."""
-        message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
-        print(f"[Server] Notificação recebida: {message_dict}")
-        # Acessar informações
-        node_id = message_dict["node_id"]
-        status = message_dict["status"]
-        print(f"Node {node_id} está {status}")
-
-        self.data_nodes[node_id]['status'] = status
-
-
-    def start_listening(self):
-        self.channel.basic_consume(queue=QUEUE_NAME_SCORE_DATA_NODE, on_message_callback=self.callback_score_data_node, auto_ack=True)
-        self.channel.basic_consume(queue=QUEUE_NAME_STATUS_DATA_NODE, on_message_callback=self.callback_status_data_node, auto_ack=True)
-        self.channel.start_consuming()
-
-
     def connect_cluster(self):
         """Estabelece conexão com todos os data nodes"""
         for key, value in self.data_nodes.items():
-            # key: data_node_i
-            # value: ((IP, PORT), socket)
-            # self.data_node_id['data_node_3'][1] = self.connect_data_node(('1.1.1.1', '8003'))
             self.data_nodes[key]['conn'] = self.connect_data_node(value['addr'])
             self.data_nodes[key]['online'] = True
         print('[STATUS] Todos os data nodes do cluster foram conectados com sucesso.')
@@ -129,7 +140,7 @@ class Cluster:
         # ]
         scored_nodes = [node_id for node_id in self.data_nodes if \
                         self.data_nodes[node_id]['online'] and \
-                        self.data_nodes[node_id]['score'] >= BASE_SCORE]
+                        None != self.data_nodes[node_id]['score'] >= BASE_SCORE]
         scored_nodes.sort(key=lambda x: x[1], reverse=True)
         storage_nodes = [node_id for node_id in scored_nodes]
         if len(storage_nodes) < self.replication_factor:

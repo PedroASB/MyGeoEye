@@ -193,16 +193,29 @@ class Server(rpyc.Service):
 
 
     def start(self):
-        server_thread = threading.Thread(target=self.start_server)
-        cluster_thread = threading.Thread(target=self.cluster.start_listening)
+        server_thread = threading.Thread(target=self.start_server, daemon=True)
+        cluster_sub_score_thread = threading.Thread(target=self.cluster.subScore.start_listening_sub_score, daemon=True)
+        cluster_sub_status_thread = threading.Thread(target=self.cluster.subStatus.start_listening_sub_status, daemon=True)
 
         # Inicia as threads
-        cluster_thread.start()
+        cluster_sub_score_thread.start()
+        cluster_sub_status_thread.start()
         server_thread.start()
 
+        try:
+            while server_thread.is_alive() or \
+                cluster_sub_score_thread.is_alive() or \
+                cluster_sub_status_thread.is_alive():
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            print("[KEYBOARD_INTERRUPT] Encerrando as threads.")
+
         # Aguarda as threads finalizarem
-        cluster_thread.join()
-        server_thread.join()
+        # cluster_sub_score_thread.join()
+        # cluster_sub_status_thread.join()
+        # server_thread.join()
+
+
 
 
     def start_server(self):
@@ -217,5 +230,3 @@ if __name__ == "__main__":
     server = Server(host=HOST_SERVER, port=PORT_SERVER, cluster=geoeye_cluster)
     if server.register_name(NAME_SERVER, HOST_NAME_SERVICE, PORT_NAME_SERVICE):
         server.start()
-    else:
-        sys.exit(0)

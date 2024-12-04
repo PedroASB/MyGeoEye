@@ -8,60 +8,95 @@ import psutil
 import threading
 from rpyc.utils.server import ThreadedServer
 
-
-PORT_DATA_NODE = 8000
+INDEX = 0
+PORT_DATA_NODE = 8000 + INDEX
 CHUNK_SIZE = 65_536 # 64 KB
-NAME_DATA_NODE = 'data_node'
+NAME_DATA_NODE = f'data_node_{INDEX}'
 
-
-class Pub:
+class PubResources:
     RABBITMQ_HOST = 'localhost'
-    QUEUE_STATUS_DATA_NODE = 'queue_status_data_node'  # Nome da fila específica para este data node
+    QUEUE_DATA_NODE_RESOURCES = 'queue_data_node_resources'  # Nome da fila específica para este data node
+    EXCHANGE_DATA_NODE_RESOURCES = 'exchange_data_node_resources'
     VERIFICATION_INTERVAL = 20 # Tempo em segundos entre cada verificação
 
     def __init__(self):
         self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.RABBITMQ_HOST))
         self.channel = self.connection.channel()
         # Declara a fila única para este monitor
-        self.channel.queue_declare(queue=self.QUEUE_STATUS_DATA_NODE)
+        self.channel.exchange_declare(exchange=self.EXCHANGE_DATA_NODE_RESOURCES, exchange_type='fanout')
+        self.channel.queue_declare(queue=self.QUEUE_DATA_NODE_RESOURCES)
 
 
-    def start_monitoring(self):
-        print("[STATUS] Iniciando monitoramento dos data nodes.")
+    def start_monitoring_resouces(self):
+        print("[STATUS] Iniciando publisher de recursos do data node.")
         try:
             while True:
-                self.notify_monitor_score()
+                self.notify_subs()
                 time.sleep(self.VERIFICATION_INTERVAL)  # Intervalo entre as verificações
         except KeyboardInterrupt:
-            print("[STATUS] Encerrando monitoramento.")
+            print("[STATUS] Encerrando publisher de recursos do data node.")
             self.connection.close()
 
 
-    def notify_monitor_score(self):
-        message_dict = self.get_node_status()
+    def notify_subs(self):
+        message_dict = self.get_node_resources()
         message_dict['node_id'] = NAME_DATA_NODE
         message_json = json.dumps(message_dict)
         
-        self.channel.basic_publish(exchange='', routing_key=self.QUEUE_STATUS_DATA_NODE, body=message_json)
-        print(f"[INFO] Notificação enviada para {self.QUEUE_STATUS_DATA_NODE}: {message_json}")
+        self.channel.basic_publish(exchange='', routing_key=self.QUEUE_DATA_NODE_RESOURCES, body=message_json)
+        print(f"[INFO] Notificação enviada para {self.QUEUE_DATA_NODE_RESOURCES}: {message_json}")
 
 
-    def get_node_status(self):
+    def get_node_resources(self):
         """Retorna o status dos recursos do nó."""
         cpu_usage = psutil.cpu_percent(interval=1)
         memory_info = psutil.virtual_memory().percent
         disk_info =  psutil.disk_usage('/').percent
         return {'cpu': cpu_usage, 'memory': memory_info, 'disk': disk_info}
 
+class PubStatus:
+    RABBITMQ_HOST = 'localhost'
+    EXCHANGE_DATA_NODE_STATUS = 'exchange_data_node_status'
+    QUEUE_DATA_NODE_STATUS = 'queue_data_node_status'  # Nome da fila específica para este data node
+    VERIFICATION_INTERVAL = 10 # Tempo em segundos entre cada verificação
+
+    def __init__(self):
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.RABBITMQ_HOST))
+        self.channel = self.connection.channel()
+        # Declara a fila única para este monitor
+        self.channel.exchange_declare(exchange=self.EXCHANGE_DATA_NODE_STATUS, exchange_type='fanout')
+        self.channel.queue_declare(queue=self.QUEUE_DATA_NODE_STATUS)
+
+
+    def start_monitoring_status(self):
+        print("[STATUS] Iniciando publisher de recursos do data node.")
+        try:
+            while True:
+                self.notify_subs()
+                time.sleep(self.VERIFICATION_INTERVAL)  # Intervalo entre as verificações
+        except KeyboardInterrupt:
+            print("[STATUS] Encerrando publisher de recursos do data node.")
+            self.connection.close()
+
+
+    def notify_subs(self):
+        message_dict = {}
+        message_dict['node_id'] = NAME_DATA_NODE
+        message_json = json.dumps(message_dict)
+        
+        self.channel.basic_publish(exchange='', routing_key=self.QUEUE_DATA_NODE_STATUS, body=message_json)
+        print(f"[INFO] Notificação enviada para {self.QUEUE_DATA_NODE_STATUS}: {message_json}")
+
 
 class DataNode(rpyc.Service):
-    STORAGE_DIR = 'data_node_storage'
+    STORAGE_DIR = f'data_node_storage_{INDEX}'
 
     def __init__(self):
         if not os.path.exists(self.STORAGE_DIR):
             os.makedirs(self.STORAGE_DIR)
         self.open_files = {}
-        self.pub = Pub()
+        self.pubResources = PubResources()
+        self.pubStatus = PubStatus()
     
 
     def exposed_clear_storage_dir(self):
@@ -125,16 +160,27 @@ class DataNode(rpyc.Service):
 
 
     def start(self):
-        main_thread = threading.Thread(target=self.start_data_node)
-        monitoring_thread = threading.Thread(target=self.pub.start_monitoring)
-
+        main_thread = threading.Thread(target=self.start_data_node, daemon=True)
+        pub_score_thread = threading.Thread(target=self.pubResources.start_monitoring_resouces, daemon=True)
+        pub_status_thread = threading.Thread(target=self.pubStatus.start_monitoring_status, daemon=True)
+        
         # Inicia as threads
-        monitoring_thread.start()
+        pub_score_thread.start()
+        pub_status_thread.start()
         main_thread.start()
 
         # Aguarda as threads finalizarem
-        monitoring_thread.join()
-        main_thread.join()
+        # pub_score_thread.join()
+        # pub_status_thread.join()
+        # main_thread.join()
+
+        try:
+            while main_thread.is_alive() or \
+                pub_score_thread.is_alive() or \
+                pub_status_thread.is_alive():
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            print("[KEYBOARD_INTERRUPT] Encerrando as threads.")
 
 
     def start_data_node(self):
