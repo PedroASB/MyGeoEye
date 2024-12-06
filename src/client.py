@@ -26,14 +26,6 @@ class Client:
         self.clear_donwload_dir() # temporário
 
 
-    def on_connect(self, conn):
-        pass
-
-
-    def on_disconnect(self, conn):
-        pass
-        
-    
     def clear_donwload_dir(self):
         """Remove todos os arquivos e subdiretórios do diretório de armazenamento."""
         if os.path.exists(self.DOWNLOAD_DIR):
@@ -159,5 +151,3 @@ if __name__ == "__main__":
     client = Client()
     if client.start(name_server=NAME_SERVER):
         client.handle_commands()
-    else:
-        sys.exit(0)

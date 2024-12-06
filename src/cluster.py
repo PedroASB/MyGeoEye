@@ -23,12 +23,10 @@ class SubScore:
     def callback_data_nodes_scores(self, ch, method, properties, body):
         """Callback para processar mensagens do RabbitMQ."""
         message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
-        print(f"[MONITOR] Notificação recebida: {message_dict}")
+        print(f"[MONITOR_SCORE] Notificação recebida: {message_dict}")
         # Acessar informações
         for node_id, score in message_dict.items():
-            self.data_nodes[node_id]['score'] = score
-            print(f'Data node "{node_id}" tem score de: {score}')
-    
+            self.data_nodes[node_id]['score'] = score    
 
     def start_listening_sub_score(self):
         self.channel.basic_consume(queue=self.QUEUE_MONITOR_DATA_NODE_SCORES, on_message_callback=self.callback_data_nodes_scores, auto_ack=True)
@@ -51,14 +49,11 @@ class SubStatus:
     def callback_data_node_status(self, ch, method, properties, body):
         """Callback para processar mensagens do RabbitMQ."""
         message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
-        print(f"[Server] Notificação recebida: {message_dict}")
+        print(f"[MONITOR_STATUS] Notificação recebida: {message_dict}")
         # Acessar informações
-        node_id = message_dict["node_id"]
-        status = message_dict["online"]
-        print(f"Node {node_id} está {status}")
+        for node_id, is_online in message_dict.items():
+            self.data_nodes[node_id]['online'] = is_online
 
-        self.data_nodes[node_id]['online'] = status
-    
 
     def start_listening_sub_status(self):
         self.channel.basic_consume(queue=self.QUEUE_MONITOR_DATA_NODE_STATUS, on_message_callback=self.callback_data_node_status, auto_ack=True)
@@ -66,7 +61,6 @@ class SubStatus:
 
 
 class Cluster:
-
     def __init__(self, data_nodes_addresses, replication_factor):
         self.data_nodes_addresses = data_nodes_addresses
         self.replication_factor = replication_factor
@@ -81,8 +75,8 @@ class Cluster:
                                                 'score': None,
                                                 }
                                                 for i in range(self.cluster_size)}
-        self.subScore = SubScore(self.data_nodes)
-        self.subStatus = SubStatus(self.data_nodes)
+        self.sub_score = SubScore(self.data_nodes)
+        self.sub_status = SubStatus(self.data_nodes)
     
 
     def exposed_get_data_nodes_addresses(self):
@@ -114,30 +108,11 @@ class Cluster:
         return data_node_conn
     
 
-    # def calculate_score(self, node_id):
-    #     """Função para calcular o score com base nos recursos disponíveis"""
-    #     data_node_conn = self.data_nodes[node_id]['conn']
-    #     node_resources = data_node_conn.root.get_node_status()
-    #     cpu, memory, disk = list(node_resources.values())
-    #     score = (
-    #         (100 - cpu)    * STATUS_WEIGHTS['cpu'] +
-    #         (100 - memory) * STATUS_WEIGHTS['memory'] +
-    #         (100 - disk)   * STATUS_WEIGHTS['disk']
-    #     )
-    #     self.data_nodes[node_id]['score'] = score
-    #     print(f'{node_id}: {score}')
-    #     return score
-
-
     def select_nodes_to_store(self):
         """
         Seleciona os data nodes para armazenamento de imagens
         Utiliza-se balanceamento de carga pelos recursos de máquina
         """
-        # scored_nodes = [
-        #     (node_id, self.calculate_score(node_id))
-        #     for node_id in self.data_nodes
-        # ]
         scored_nodes = [node_id for node_id in self.data_nodes if \
                         self.data_nodes[node_id]['online'] and \
                         None != self.data_nodes[node_id]['score'] >= BASE_SCORE]
@@ -145,6 +120,7 @@ class Cluster:
         storage_nodes = [node_id for node_id in scored_nodes]
         if len(storage_nodes) < self.replication_factor:
             storage_nodes = [node_id for node_id, _ in scored_nodes[:self.replication_factor]]
+        print(f'[INFO] Data nodes selecionados para armazenamento: {storage_nodes}')
         return storage_nodes
 
 

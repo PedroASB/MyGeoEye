@@ -50,6 +50,7 @@ class Server(rpyc.Service):
     def on_connect(self, conn):
         print("[STATUS] Cliente conectado.")
 
+
     def on_disconnect(self, conn):
         print("[STATUS] Cliente desconectado.")
 
@@ -147,6 +148,9 @@ class Server(rpyc.Service):
 
     def exposed_list_images(self):
         """Lista todas as imagens que estão armazenadas"""
+        # TODO: remover este trecho:
+        for node_id, info in self.cluster.data_nodes.items():
+            print(f'{node_id}: online={info['online']}, score={info['score']}')
         return list(self.cluster.index_table.keys())
 
 
@@ -180,22 +184,10 @@ class Server(rpyc.Service):
         return True
 
 
-    # def start(self):
-    #     t = ThreadedServer(service=self, port=self.port,
-    #                        protocol_config={'allow_public_attrs': True})
-    #     # self.start_listening()
-    #     thread = threading.Thread(target=self.cluster.start_listening)
-    #     #thread_2 = threading.Thread(target=self.listen_queue_2)
-    #     thread.start()
-    #     thread.join()
-    #     print(f'[STATUS] Servidor iniciado na porta {self.port}.')
-    #     t.start()
-
-
     def start(self):
         server_thread = threading.Thread(target=self.start_server, daemon=True)
-        cluster_sub_score_thread = threading.Thread(target=self.cluster.subScore.start_listening_sub_score, daemon=True)
-        cluster_sub_status_thread = threading.Thread(target=self.cluster.subStatus.start_listening_sub_status, daemon=True)
+        cluster_sub_score_thread = threading.Thread(target=self.cluster.sub_score.start_listening_sub_score, daemon=True)
+        cluster_sub_status_thread = threading.Thread(target=self.cluster.sub_status.start_listening_sub_status, daemon=True)
 
         # Inicia as threads
         cluster_sub_score_thread.start()
@@ -214,8 +206,6 @@ class Server(rpyc.Service):
         # cluster_sub_score_thread.join()
         # cluster_sub_status_thread.join()
         # server_thread.join()
-
-
 
 
     def start_server(self):

@@ -1,6 +1,5 @@
 import rpyc
 import os
-import io
 import time
 import pika
 import json
@@ -54,6 +53,7 @@ class PubResources:
         disk_info =  psutil.disk_usage('/').percent
         return {'cpu': cpu_usage, 'memory': memory_info, 'disk': disk_info}
 
+
 class PubStatus:
     RABBITMQ_HOST = 'localhost'
     EXCHANGE_DATA_NODE_STATUS = 'exchange_data_node_status'
@@ -82,8 +82,8 @@ class PubStatus:
     def notify_subs(self):
         message_dict = {}
         message_dict['node_id'] = NAME_DATA_NODE
+        message_dict['time'] = time.time()
         message_json = json.dumps(message_dict)
-        
         self.channel.basic_publish(exchange='', routing_key=self.QUEUE_DATA_NODE_STATUS, body=message_json)
         print(f"[INFO] Notificação enviada para {self.QUEUE_DATA_NODE_STATUS}: {message_json}")
 
@@ -95,8 +95,8 @@ class DataNode(rpyc.Service):
         if not os.path.exists(self.STORAGE_DIR):
             os.makedirs(self.STORAGE_DIR)
         self.open_files = {}
-        self.pubResources = PubResources()
-        self.pubStatus = PubStatus()
+        self.pub_resources = PubResources()
+        self.pub_status = PubStatus()
     
 
     def exposed_clear_storage_dir(self):
@@ -161,8 +161,8 @@ class DataNode(rpyc.Service):
 
     def start(self):
         main_thread = threading.Thread(target=self.start_data_node, daemon=True)
-        pub_score_thread = threading.Thread(target=self.pubResources.start_monitoring_resouces, daemon=True)
-        pub_status_thread = threading.Thread(target=self.pubStatus.start_monitoring_status, daemon=True)
+        pub_score_thread = threading.Thread(target=self.pub_resources.start_monitoring_resouces, daemon=True)
+        pub_status_thread = threading.Thread(target=self.pub_status.start_monitoring_status, daemon=True)
         
         # Inicia as threads
         pub_score_thread.start()
