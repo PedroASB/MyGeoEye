@@ -4,7 +4,7 @@ from addresses import *
 
 RABBITMQ_HOST = 'localhost'
 
-DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR]
+DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR, DATA_NODE_5_ADDR]
 RECALCULATE_SCORE_INTERVAL = 20 # Tempo em segundos entre cada cálculo de score
 STATUS_WEIGHTS = {"cpu": 0.3, "memory": 0.2, "disk": 0.5}
 
@@ -55,7 +55,7 @@ class Pub:
         message_dict = self.nodes_scores
         message_json = json.dumps(message_dict)
         self.channel.basic_publish(exchange='', routing_key=self.QUEUE_MONITOR_DATA_NODE_SCORES, body=message_json)
-        print(f"[INFO] Notificação enviada para {self.QUEUE_MONITOR_DATA_NODE_SCORES}: {message_json}")
+        print(f"[MONITOR_SCORE] Notificação enviada para {self.QUEUE_MONITOR_DATA_NODE_SCORES}: {message_json}")
 
 
 class Sub:
@@ -79,7 +79,7 @@ class Sub:
     def callback_data_nodes_resources(self, ch, method, properties, body):
         """Callback para processar mensagens do RabbitMQ."""
         message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
-        print(f"[MONITOR] Notificação recebida: {message_dict}")
+        print(f"[MONITOR_SCORE] Notificação recebida: {message_dict}")
         node_id = message_dict['node_id']
         self.nodes_resources[node_id]['cpu'] = message_dict['cpu']
         self.nodes_resources[node_id]['memory'] = message_dict['memory']

@@ -44,6 +44,8 @@ class SubScore:
         # Acessar informações
         with self.lock:
             for node_id, score in message_dict.items():
+                if node_id not in self.data_nodes:
+                    continue
                 self.data_nodes[node_id]['score'] = score    
 
     def start_listening_sub_score(self):
@@ -55,13 +57,14 @@ class SubStatus:
     EXCHANGE_MONITOR_DATA_NODE_STATUS = 'exchange_monitor_data_node_status'
     QUEUE_MONITOR_DATA_NODE_STATUS = 'queue_monitor_data_node_status'
 
-    def __init__(self, data_nodes, lock):
+    def __init__(self, data_nodes, lock, handle_offline_node):
         self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
         self.channel = self.connection.channel()
         self.channel.exchange_declare(exchange=self.EXCHANGE_MONITOR_DATA_NODE_STATUS, exchange_type='fanout')
         self.channel.queue_declare(queue=self.QUEUE_MONITOR_DATA_NODE_STATUS)
         self.channel.queue_bind(exchange=self.EXCHANGE_MONITOR_DATA_NODE_STATUS, queue=self.QUEUE_MONITOR_DATA_NODE_STATUS)
         self.data_nodes = data_nodes
+        self.handle_offline_node = handle_offline_node
         self.lock = lock
     
 
@@ -72,9 +75,12 @@ class SubStatus:
         # Acessar informações
         with self.lock:
             for node_id, is_online in message_dict.items():
+                if node_id not in self.data_nodes:
+                    continue
                 self.data_nodes[node_id]['online'] = is_online
                 # server.name:AttributeError
-                
+                if is_online is False:
+                    self.handle_offline_node(node_id)
 
 
     def start_listening_sub_status(self):
@@ -84,24 +90,27 @@ class SubStatus:
 
 
 class Cluster:
-    def __init__(self, data_nodes_addresses, replication_factor):
-        self.data_nodes_addresses = data_nodes_addresses
+    def __init__(self, cluster_size, replication_factor, name_service_conn):
+        self.cluster_size = cluster_size
+        self.data_nodes_addresses = name_service_conn.root.lookup_data_nodes(quantity=cluster_size)
+        print('Data nodes:')
+        print(self.data_nodes_addresses)
         self.replication_factor = replication_factor
-        # self.division_factor = division_factor
-        self.cluster_size = len(data_nodes_addresses)
+        self.name_service_conn = name_service_conn
         self.current_node_to_store = 1
         self.index_table = {}
-        self.data_nodes = {f'data_node_{i+1}': {
-                                                'addr': self.data_nodes_addresses[i], 
-                                                'conn': None, 
-                                                'online': None,
-                                                'score': None,
-                                                }
-                                                for i in range(self.cluster_size)}
+        # TODO: arrumar índices dos data nodes
+        self.data_nodes = {node_id: {
+                                    'addr': address, 
+                                    'conn': None, 
+                                    'online': None,
+                                    'score': None,
+                                    }
+                                    for node_id, address in self.data_nodes_addresses.items()}
         self.lock = threading.Lock()
         self.sub_score = PubNodesServer(self.data_nodes, self.lock)
         self.sub_score = SubScore(self.data_nodes, self.lock)
-        self.sub_status = SubStatus(self.data_nodes, self.lock)
+        self.sub_status = SubStatus(self.data_nodes, self.lock, self.handle_offline_node)
     
 
     def exposed_get_data_nodes_addresses(self):
@@ -116,7 +125,7 @@ class Cluster:
         print('[STATUS] Todos os data nodes do cluster foram conectados com sucesso.')
 
 
-    def connect_data_node(self, address):
+    def connect_data_node(self, address, persistent=True):
         data_node_conn = None
         ip, port = address[0], address[1]
         while not data_node_conn:
@@ -127,12 +136,14 @@ class Cluster:
                 # TODO: tirar isso:
                 data_node_conn.root.clear_storage_dir()
             except ConnectionRefusedError:
+                if not persistent:
+                    return None
                 print("[STATUS] Conexão recusada. Tentando novamente em 5 segundos.")
                 data_node_conn = None
                 time.sleep(5)
         return data_node_conn
     
-
+    
     def select_nodes_to_store(self):
         """
         Seleciona os data nodes para armazenamento de imagens
@@ -200,20 +211,51 @@ class Cluster:
         # print()
 
 
-    def update_download(self):
-        pass
+    def connect_new_data_node(self, old_data_node_id):
+        available_data_nodes = self.name_service_conn.root.lookup_data_nodes()
+        del self.data_nodes[old_data_node_id]
+        new_node_conn = None
+        while new_node_conn is None:
+            for node_id, addr in available_data_nodes.items():
+                if node_id not in self.data_nodes:
+                    print(f'[STATUS] Recuperação pós falha: tentando conectar ao data node "{node_id}"')
+                    new_node_conn = self.connect_data_node(address=addr, persistent=False)
+                    if new_node_conn:
+                        self.data_nodes[node_id] = {}
+                        self.data_nodes[node_id]['addr'] = addr
+                        self.data_nodes[node_id]['conn'] = new_node_conn
+                        self.data_nodes[node_id]['online'] = True
+                        self.data_nodes[node_id]['score'] = None
+                        return node_id
+        return None
+                
 
+    def new_storage(self, source_nodes_ids, new_node_id, image_shard_name):
+        store_node = self.data_nodes[new_node_id]
+        retrieval_node = self.data_nodes[source_nodes_ids[0]]
 
-    def handle_offline_node(self, offline_node_id, new_node_id):
+        print('new_node_id =', new_node_id, '\n')
+        print('source_nodes_ids =', source_nodes_ids)
+        print('retrieval_node_id =', source_nodes_ids[0])
+
+        image_shard = retrieval_node['conn'].root.retrieve_image_shard(image_shard_name)
+        store_node['conn'].root.store_image_shard(image_shard_name, image_shard)
+
+    
+    def handle_offline_node(self, offline_node_id):
+        new_node_id = self.connect_new_data_node(offline_node_id)
         # img_01  ->  [part_0: {'nodes': 3 2 4, 'size': 100}, ...]
-        for registry in self.index_table.values():
+        for image_name, registry in self.index_table.items():
             # img_0 -> [part_0: {'nodes': 3 2 4, 'size': 100}, ...]
             # img_1 -> [part_0: {'nodes': 1 9 4, 'size': 100}, ...]
             # img_2 -> [part_0: {'nodes': 7 8 3, 'size': 100}, ...]
-            for shard in registry:
+            for shard_index, shard in enumerate(registry):
                 # [part_0: {'nodes': 7 8 3, 'size': 100}, ...]
                 if offline_node_id in shard['nodes']:
-                    # 'nodes:' [2 3 4]
+                    # 'nodes:' [2 3 4* 5]
                     shard['nodes'].remove(offline_node_id)
-                    # (Chamar função para baixar um shard e inserir em shard['nodes'])
+                    source_nodes_ids = shard['nodes'][:]
+                    image_shard_name = f'{image_name}%part{shard_index}%'
+                    print('image_shard_name =', image_shard_name)
+                    self.new_storage(source_nodes_ids, new_node_id, image_shard_name)
                     shard['nodes'].append(new_node_id)

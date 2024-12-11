@@ -147,8 +147,13 @@ class Server(rpyc.Service):
     def exposed_list_images(self):
         """Lista todas as imagens que estão armazenadas"""
         # TODO: remover este trecho:
+        print('-----------[DATA NODES INFO]-----------')
         for node_id, info in self.cluster.data_nodes.items():
             print(f'{node_id}: online={info['online']}, score={info['score']}')
+        print('-------------[INDEX TABLE]-------------')
+        for k, v in self.cluster.index_table.items():
+            print(k, v)
+        print('---------------------------------------')
         return list(self.cluster.index_table.keys())
 
 
@@ -219,10 +224,7 @@ class Server(rpyc.Service):
 if __name__ == "__main__":
     try:
         name_service_conn = rpyc.connect(HOST_NAME_SERVICE, PORT_NAME_SERVICE)
-        data_nodes_addresses = name_service_conn.root.lookup_data_nodes(quantity=CLUSTER_SIZE)
-        print('Data nodes:')
-        print(data_nodes_addresses)
-        geoeye_cluster = Cluster(data_nodes_addresses, REPLICATION_FACTOR)
+        geoeye_cluster = Cluster(CLUSTER_SIZE, REPLICATION_FACTOR, name_service_conn)
         server = Server(host=HOST_SERVER, port=PORT_SERVER, cluster=geoeye_cluster)
         if server.register_name(NAME_SERVER, HOST_NAME_SERVICE, PORT_NAME_SERVICE):
             server.start()

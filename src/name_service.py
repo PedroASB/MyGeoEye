@@ -16,17 +16,18 @@ class NameService(rpyc.Service):
     def exposed_lookup(self, name):
         return self.registry.get(name, False)
 
-    def exposed_lookup_data_nodes(self, quantity):
+    def exposed_lookup_data_nodes(self, quantity=None):
         pattern = re.compile(r"^data_node_\d+$")
         data_nodes = {key: value for key, value in self.registry.items() if pattern.match(key)}
-        data_nodes = dict(islice(data_nodes.items(), quantity))
+        if quantity is not None:
+            data_nodes = dict(islice(data_nodes.items(), quantity))
         return data_nodes
     
     def exposed_list_servers(self):
         return self.registry
     
     def start(self, port):
-        t = ThreadedServer(service=self, port=port)
+        t = ThreadedServer(service=self, port=port, protocol_config={'allow_public_attrs': True})
         print(f'[STATUS] Serviço de nomes iniciado na porta {port}')
         t.start()
 

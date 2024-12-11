@@ -3,7 +3,7 @@ from copy import deepcopy
 from addresses import *
 
 RABBITMQ_HOST = 'localhost'
-DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR]
+DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR, DATA_NODE_5_ADDR]
 RECALCULATE_STATUS_INTERVAL = 10
 TIMEOUT = 15
 
@@ -22,18 +22,18 @@ class Pub:
 
     def start_monitoring(self):
         """Inicia o monitoramento periódico."""
-        print("[Monitor] Iniciando monitoramento dos Data Nodes...")
+        print("[MONITOR_STATUS] Iniciando monitoramento dos Data Nodes...")
         try:
             while True:
                 with self.lock:
                     changed_nodes = self.get_changed_nodes()
                     print(f"nodes_status: {self.nodes_status}")
                     print(f"changed_nodes: {changed_nodes}")
-                if changed_nodes:
-                    self.notify_subs(changed_nodes)
+                    if changed_nodes:
+                        self.notify_subs(changed_nodes)
                 time.sleep(RECALCULATE_STATUS_INTERVAL)  # Intervalo entre as verificações
         except KeyboardInterrupt:
-            print("[Monitor] Encerrando monitoramento...")
+            print("[MONITOR_STATUS] Encerrando monitoramento...")
             self.connection.close()
 
 
@@ -41,8 +41,13 @@ class Pub:
         """Envia uma mensagem ao servidor notificando o status do Data Node."""
         message_dict = changed_nodes
         message_json = json.dumps(message_dict)
-        self.channel.basic_publish(exchange='', routing_key=self.QUEUE_MONITOR_DATA_NODE_STATUS, body=message_json)
-        print(f"[Monitor] Notificação enviada para {self.QUEUE_MONITOR_DATA_NODE_STATUS}: {message_json}")
+        while True:
+            try:
+                self.channel.basic_publish(exchange='', routing_key=self.QUEUE_MONITOR_DATA_NODE_STATUS, body=message_json)
+                break
+            except Exception:
+                print("Erro ao publicar")
+        print(f"[MONITOR_STATUS] Notificação enviada para {self.QUEUE_MONITOR_DATA_NODE_STATUS}: {message_json}")
 
 
     def get_changed_nodes(self):
@@ -88,7 +93,7 @@ class Sub:
         node_id = message_dict['node_id']
         with self.lock:
             self.nodes_status[node_id]['time'] = message_dict['time']
-        print(f"[Monitor] Notificação recebida: {message_dict}")
+        print(f"[MONITOR_STATUS] Notificação recebida: {message_dict}")
 
 
 class MonitorStatus:

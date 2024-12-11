@@ -11,8 +11,10 @@ NAME_DATA_NODE = f'data_node_{INDEX}'
 HOST_NAME_SERVICE = 'localhost'
 PORT_NAME_SERVICE = 6000
 
-# Tamanho de chunks
-CHUNK_SIZE = 65_536 # 64 KB
+# Tamanho de chunks / fragmentos
+CHUNK_SIZE = 65_536     # 64 KB
+SHARD_SIZE = 2_097_152  # 2 MB
+
 
 class PubResources:
     RABBITMQ_HOST = 'localhost'
@@ -151,6 +153,19 @@ class DataNode(rpyc.Service):
         #     print(of)
         
         return image_chunk, eof
+
+
+    def exposed_store_image_shard(self, image_shard_name, image_shard):
+        image_shard_path = os.path.join(self.STORAGE_DIR, image_shard_name)
+        with open(image_shard_path, "wb") as file:
+            file.write(image_shard)
+
+
+    def exposed_retrieve_image_shard(self, image_shard_name):
+        image_shard_path = os.path.join(self.STORAGE_DIR, image_shard_name)
+        with open(image_shard_path, "rb") as file:
+            image_shard = file.read(SHARD_SIZE)
+        return image_shard
 
 
     def exposed_delete_image(self, image_name, shard_index):
