@@ -1,4 +1,5 @@
-import rpyc
+import rpyc, re
+from itertools import islice
 from rpyc.utils.server import ThreadedServer
 
 HOST_NAME_SERVICE = 'localhost'
@@ -10,11 +11,17 @@ class NameService(rpyc.Service):
 
     def exposed_register(self, name, host, port):
         self.registry[name] = (host, port)
-        print(f'[NEW REGISTRY] Servidor "{name}" registrado em {host}:{port}.')
+        print(f'[NEW REGISTRY] Serviço "{name}" registrado em {host}:{port}.')
 
     def exposed_lookup(self, name):
         return self.registry.get(name, False)
 
+    def exposed_lookup_data_nodes(self, quantity):
+        pattern = re.compile(r"^data_node_\d+$")
+        data_nodes = {key: value for key, value in self.registry.items() if pattern.match(key)}
+        data_nodes = dict(islice(data_nodes.items(), quantity))
+        return data_nodes
+    
     def exposed_list_servers(self):
         return self.registry
     

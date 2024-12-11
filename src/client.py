@@ -1,7 +1,4 @@
-import sys
-import rpyc
-import time
-import os
+import rpyc, time, os
 
 # Servidor
 NAME_SERVER = 'geoeye_images'

@@ -1,23 +1,40 @@
-import rpyc
-import time
-import pika
-import json
+import rpyc, time, pika, json, threading
 
-# Configurações do RabbitMQ
 RABBITMQ_HOST = 'localhost'
 BASE_SCORE = 42
+
+class PubNodesServer:
+    EXCHANGE_MONITOR_DATA_NODE_STATUS = 'exchange_monitor_data_node_status'
+    QUEUE_MONITOR_DATA_NODE_STATUS = 'queue_monitor_data_node_status'
+
+    def __init__(self, nodes_status, lock):
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        self.channel = self.connection.channel()
+        self.channel.exchange_declare(exchange=self.EXCHANGE_MONITOR_DATA_NODE_STATUS, exchange_type='fanout')
+        self.channel.queue_declare(queue=self.QUEUE_MONITOR_DATA_NODE_STATUS)
+        self.nodes_status = nodes_status
+        self.lock = lock
+
+    def notify_subs(self, changed_nodes):
+        """Envia uma mensagem ao servidor notificando o status do Data Node."""
+        message_dict = changed_nodes
+        message_json = json.dumps(message_dict)
+        self.channel.basic_publish(exchange='', routing_key=self.QUEUE_MONITOR_DATA_NODE_STATUS, body=message_json)
+        print(f"[Monitor] Notificação enviada para {self.QUEUE_MONITOR_DATA_NODE_STATUS}: {message_json}")
+
 
 class SubScore:
     EXCHANGE_MONITOR_DATA_NODE_SCORES = 'exchange_monitor_data_node_scores'
     QUEUE_MONITOR_DATA_NODE_SCORES = 'queue_monitor_data_node_scores'
 
-    def __init__(self, data_nodes):
+    def __init__(self, data_nodes, lock):
         self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
         self.channel = self.connection.channel()
         self.channel.exchange_declare(exchange=self.EXCHANGE_MONITOR_DATA_NODE_SCORES, exchange_type='fanout')
         self.channel.queue_declare(queue=self.QUEUE_MONITOR_DATA_NODE_SCORES)
         self.channel.queue_bind(exchange=self.EXCHANGE_MONITOR_DATA_NODE_SCORES, queue=self.QUEUE_MONITOR_DATA_NODE_SCORES)
         self.data_nodes = data_nodes
+        self.lock = lock
 
 
     def callback_data_nodes_scores(self, ch, method, properties, body):
@@ -25,8 +42,9 @@ class SubScore:
         message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
         print(f"[MONITOR_SCORE] Notificação recebida: {message_dict}")
         # Acessar informações
-        for node_id, score in message_dict.items():
-            self.data_nodes[node_id]['score'] = score    
+        with self.lock:
+            for node_id, score in message_dict.items():
+                self.data_nodes[node_id]['score'] = score    
 
     def start_listening_sub_score(self):
         self.channel.basic_consume(queue=self.QUEUE_MONITOR_DATA_NODE_SCORES, on_message_callback=self.callback_data_nodes_scores, auto_ack=True)
@@ -37,13 +55,14 @@ class SubStatus:
     EXCHANGE_MONITOR_DATA_NODE_STATUS = 'exchange_monitor_data_node_status'
     QUEUE_MONITOR_DATA_NODE_STATUS = 'queue_monitor_data_node_status'
 
-    def __init__(self, data_nodes):
+    def __init__(self, data_nodes, lock):
         self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
         self.channel = self.connection.channel()
         self.channel.exchange_declare(exchange=self.EXCHANGE_MONITOR_DATA_NODE_STATUS, exchange_type='fanout')
         self.channel.queue_declare(queue=self.QUEUE_MONITOR_DATA_NODE_STATUS)
         self.channel.queue_bind(exchange=self.EXCHANGE_MONITOR_DATA_NODE_STATUS, queue=self.QUEUE_MONITOR_DATA_NODE_STATUS)
         self.data_nodes = data_nodes
+        self.lock = lock
     
 
     def callback_data_node_status(self, ch, method, properties, body):
@@ -51,12 +70,16 @@ class SubStatus:
         message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
         print(f"[MONITOR_STATUS] Notificação recebida: {message_dict}")
         # Acessar informações
-        for node_id, is_online in message_dict.items():
-            self.data_nodes[node_id]['online'] = is_online
+        with self.lock:
+            for node_id, is_online in message_dict.items():
+                self.data_nodes[node_id]['online'] = is_online
+                # server.name:AttributeError
+                
 
 
     def start_listening_sub_status(self):
-        self.channel.basic_consume(queue=self.QUEUE_MONITOR_DATA_NODE_STATUS, on_message_callback=self.callback_data_node_status, auto_ack=True)
+        self.channel.basic_consume(queue=self.QUEUE_MONITOR_DATA_NODE_STATUS, 
+                                   on_message_callback=self.callback_data_node_status, auto_ack=True)
         self.channel.start_consuming()
 
 
@@ -75,8 +98,10 @@ class Cluster:
                                                 'score': None,
                                                 }
                                                 for i in range(self.cluster_size)}
-        self.sub_score = SubScore(self.data_nodes)
-        self.sub_status = SubStatus(self.data_nodes)
+        self.lock = threading.Lock()
+        self.sub_score = PubNodesServer(self.data_nodes, self.lock)
+        self.sub_score = SubScore(self.data_nodes, self.lock)
+        self.sub_status = SubStatus(self.data_nodes, self.lock)
     
 
     def exposed_get_data_nodes_addresses(self):
@@ -164,7 +189,7 @@ class Cluster:
 
     def update_index_table(self, image_name, shard_index, shard_size, nodes_id):
         """Atualiza a tabela de índices para uma imagem dividida em partes."""
-        # img_01  ->  [[part_0: {'nodes': 3 2 4, 'size': 100}, ...]
+        # img_01  ->  [part_0: {'nodes': 3 2 4, 'size': 100}, ...]
         for node_id in nodes_id:
             if node_id not in self.index_table[image_name][shard_index]:
                 self.index_table[image_name][shard_index]['nodes'].append(node_id)
@@ -173,3 +198,22 @@ class Cluster:
         # for k, v in self.index_table.items():
         #     print(f'{k}: {v}')
         # print()
+
+
+    def update_download(self):
+        pass
+
+
+    def handle_offline_node(self, offline_node_id, new_node_id):
+        # img_01  ->  [part_0: {'nodes': 3 2 4, 'size': 100}, ...]
+        for registry in self.index_table.values():
+            # img_0 -> [part_0: {'nodes': 3 2 4, 'size': 100}, ...]
+            # img_1 -> [part_0: {'nodes': 1 9 4, 'size': 100}, ...]
+            # img_2 -> [part_0: {'nodes': 7 8 3, 'size': 100}, ...]
+            for shard in registry:
+                # [part_0: {'nodes': 7 8 3, 'size': 100}, ...]
+                if offline_node_id in shard['nodes']:
+                    # 'nodes:' [2 3 4]
+                    shard['nodes'].remove(offline_node_id)
+                    # (Chamar função para baixar um shard e inserir em shard['nodes'])
+                    shard['nodes'].append(new_node_id)

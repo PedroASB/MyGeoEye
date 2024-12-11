@@ -1,16 +1,18 @@
-import rpyc
-import os
-import time
-import pika
-import json
-import psutil
-import threading
+import rpyc, os, time, pika, json, psutil, threading
 from rpyc.utils.server import ThreadedServer
 
+# Data node
 INDEX = 0
 PORT_DATA_NODE = 8000 + INDEX
-CHUNK_SIZE = 65_536 # 64 KB
+HOST_DATA_NODE = 'localhost'
 NAME_DATA_NODE = f'data_node_{INDEX}'
+
+# Serviço de nomes
+HOST_NAME_SERVICE = 'localhost'
+PORT_NAME_SERVICE = 6000
+
+# Tamanho de chunks
+CHUNK_SIZE = 65_536 # 64 KB
 
 class PubResources:
     RABBITMQ_HOST = 'localhost'
@@ -91,12 +93,14 @@ class PubStatus:
 class DataNode(rpyc.Service):
     STORAGE_DIR = f'data_node_storage_{INDEX}'
 
-    def __init__(self):
+    def __init__(self, host, port):
         if not os.path.exists(self.STORAGE_DIR):
             os.makedirs(self.STORAGE_DIR)
         self.open_files = {}
         self.pub_resources = PubResources()
         self.pub_status = PubStatus()
+        self.host = host
+        self.port = port
     
 
     def exposed_clear_storage_dir(self):
@@ -183,6 +187,18 @@ class DataNode(rpyc.Service):
             print("[KEYBOARD_INTERRUPT] Encerrando as threads.")
 
 
+    def register_name(self, name, host_name_service, port_name_service):
+        try:
+            name_service_conn = rpyc.connect(host_name_service, port_name_service)
+        except ConnectionRefusedError:
+            print('[ERRO] Não foi possível estabelecer conexão com o serviço de nomes.')
+            return False
+        if not name_service_conn.root.lookup(name):
+            name_service_conn.root.register(name, self.host, self.port)
+        print(f'[STATUS] Servidor registrado no serviço de nomes como "{name}".')
+        return True
+
+
     def start_data_node(self):
         threaded_data_node = ThreadedServer(service=self,
                                             port=PORT_DATA_NODE,
@@ -192,5 +208,6 @@ class DataNode(rpyc.Service):
         
 
 if __name__ == "__main__":
-    data_node = DataNode()
-    data_node.start()
+    data_node = DataNode(HOST_DATA_NODE, PORT_DATA_NODE)
+    if data_node.register_name(NAME_DATA_NODE, HOST_NAME_SERVICE, PORT_NAME_SERVICE):
+        data_node.start()

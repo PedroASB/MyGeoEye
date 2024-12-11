@@ -1,7 +1,4 @@
-import sys
-import rpyc
-import math
-import threading
+import rpyc, math, threading, sys
 from itertools import cycle, islice
 from rpyc.utils.server import ThreadedServer
 from cluster import *
@@ -23,6 +20,7 @@ SHARD_SIZE = 2_097_152  # 2 MB
 
 
 DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR]
+CLUSTER_SIZE = 4 # Quantidade total de data nodes
 REPLICATION_FACTOR = 2 # Fator de réplica
 
 
@@ -109,7 +107,7 @@ class Server(rpyc.Service):
             node = self.cluster.data_nodes[node_id]
             node['conn'].root.store_image_chunk(self.current_image_name,
                                                 self.current_shard_index, image_chunk)
- 
+
 
     def exposed_init_download_image_chunk(self, image_name):
         if image_name not in self.cluster.index_table:
@@ -188,16 +186,19 @@ class Server(rpyc.Service):
         server_thread = threading.Thread(target=self.start_server, daemon=True)
         cluster_sub_score_thread = threading.Thread(target=self.cluster.sub_score.start_listening_sub_score, daemon=True)
         cluster_sub_status_thread = threading.Thread(target=self.cluster.sub_status.start_listening_sub_status, daemon=True)
-
+        # cluster_pub_nodes_server_thread = threading.Thread(target=self.cluster.sub_status.start_monitoring, daemon=True)
+        
         # Inicia as threads
         cluster_sub_score_thread.start()
         cluster_sub_status_thread.start()
+        # cluster_pub_nodes_server_thread.start()
         server_thread.start()
-
+        
         try:
             while server_thread.is_alive() or \
                 cluster_sub_score_thread.is_alive() or \
                 cluster_sub_status_thread.is_alive():
+                # cluster_pub_nodes_server_thread.is_alive():
                 time.sleep(0.1)
         except KeyboardInterrupt:
             print("[KEYBOARD_INTERRUPT] Encerrando as threads.")
@@ -216,7 +217,15 @@ class Server(rpyc.Service):
 
 
 if __name__ == "__main__":
-    geoeye_cluster = Cluster(DATA_NODES_ADDR, REPLICATION_FACTOR)
-    server = Server(host=HOST_SERVER, port=PORT_SERVER, cluster=geoeye_cluster)
-    if server.register_name(NAME_SERVER, HOST_NAME_SERVICE, PORT_NAME_SERVICE):
-        server.start()
+    try:
+        name_service_conn = rpyc.connect(HOST_NAME_SERVICE, PORT_NAME_SERVICE)
+        data_nodes_addresses = name_service_conn.root.lookup_data_nodes(quantity=CLUSTER_SIZE)
+        print('Data nodes:')
+        print(data_nodes_addresses)
+        geoeye_cluster = Cluster(data_nodes_addresses, REPLICATION_FACTOR)
+        server = Server(host=HOST_SERVER, port=PORT_SERVER, cluster=geoeye_cluster)
+        if server.register_name(NAME_SERVER, HOST_NAME_SERVICE, PORT_NAME_SERVICE):
+            server.start()
+    except ConnectionRefusedError:
+        print('[ERRO] Não foi possível estabelecer conexão com o serviço de nomes.')
+        sys.exit(0)
