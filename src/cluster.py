@@ -3,24 +3,24 @@ import rpyc, time, pika, json, threading
 RABBITMQ_HOST = 'localhost'
 BASE_SCORE = 42
 
-class PubNodesServer:
-    EXCHANGE_MONITOR_DATA_NODE_STATUS = 'exchange_monitor_data_node_status'
-    QUEUE_MONITOR_DATA_NODE_STATUS = 'queue_monitor_data_node_status'
+# class PubNodesServer:
+#     EXCHANGE_MONITOR_DATA_NODE_STATUS = 'exchange_monitor_data_node_status'
+#     QUEUE_MONITOR_DATA_NODE_STATUS = 'queue_monitor_data_node_status'
 
-    def __init__(self, nodes_status, lock):
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
-        self.channel = self.connection.channel()
-        self.channel.exchange_declare(exchange=self.EXCHANGE_MONITOR_DATA_NODE_STATUS, exchange_type='fanout')
-        self.channel.queue_declare(queue=self.QUEUE_MONITOR_DATA_NODE_STATUS)
-        self.nodes_status = nodes_status
-        self.lock = lock
+#     def __init__(self, nodes_status, lock):
+#         self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+#         self.channel = self.connection.channel()
+#         self.channel.exchange_declare(exchange=self.EXCHANGE_MONITOR_DATA_NODE_STATUS, exchange_type='fanout')
+#         self.channel.queue_declare(queue=self.QUEUE_MONITOR_DATA_NODE_STATUS)
+#         self.nodes_status = nodes_status
+#         self.lock = lock
 
-    def notify_subs(self, changed_nodes):
-        """Envia uma mensagem ao servidor notificando o status do Data Node."""
-        message_dict = changed_nodes
-        message_json = json.dumps(message_dict)
-        self.channel.basic_publish(exchange='', routing_key=self.QUEUE_MONITOR_DATA_NODE_STATUS, body=message_json)
-        print(f"[Monitor] Notificação enviada para {self.QUEUE_MONITOR_DATA_NODE_STATUS}: {message_json}")
+#     def notify_subs(self, changed_nodes):
+#         """Envia uma mensagem ao servidor notificando o status do Data Node."""
+#         message_dict = changed_nodes
+#         message_json = json.dumps(message_dict)
+#         self.channel.basic_publish(exchange='', routing_key=self.QUEUE_MONITOR_DATA_NODE_STATUS, body=message_json)
+#         print(f"[Monitor] Notificação enviada para {self.QUEUE_MONITOR_DATA_NODE_STATUS}: {message_json}")
 
 
 class SubScore:
@@ -37,7 +37,7 @@ class SubScore:
         self.lock = lock
 
 
-    def callback_data_nodes_scores(self, ch, method, properties, body):
+    def callback_data_nodes_scores(self, ch, method, properties, body): #raise
         """Callback para processar mensagens do RabbitMQ."""
         message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
         print(f"[MONITOR_SCORE] Notificação recebida: {message_dict}")
@@ -46,9 +46,10 @@ class SubScore:
             for node_id, score in message_dict.items():
                 if node_id not in self.data_nodes:
                     continue
-                self.data_nodes[node_id]['score'] = score    
+                self.data_nodes[node_id]['score'] = score
 
-    def start_listening_sub_score(self):
+
+    def start_listening_sub_score(self): #raise
         self.channel.basic_consume(queue=self.QUEUE_MONITOR_DATA_NODE_SCORES, on_message_callback=self.callback_data_nodes_scores, auto_ack=True)
         self.channel.start_consuming()
 
@@ -68,7 +69,7 @@ class SubStatus:
         self.lock = lock
     
 
-    def callback_data_node_status(self, ch, method, properties, body):
+    def callback_data_node_status(self, ch, method, properties, body): #raise
         """Callback para processar mensagens do RabbitMQ."""
         message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
         print(f"[MONITOR_STATUS] Notificação recebida: {message_dict}")
@@ -83,23 +84,31 @@ class SubStatus:
                     self.handle_offline_node(node_id)
 
 
-    def start_listening_sub_status(self):
+    def start_listening_sub_status(self): #raise
         self.channel.basic_consume(queue=self.QUEUE_MONITOR_DATA_NODE_STATUS, 
                                    on_message_callback=self.callback_data_node_status, auto_ack=True)
         self.channel.start_consuming()
 
 
-class Cluster:
+class Cluster: #raise
     def __init__(self, cluster_size, replication_factor, name_service_conn):
-        self.cluster_size = cluster_size
-        self.data_nodes_addresses = name_service_conn.root.lookup_data_nodes(quantity=cluster_size)
-        print('Data nodes:')
-        print(self.data_nodes_addresses)
         self.replication_factor = replication_factor
         self.name_service_conn = name_service_conn
-        self.current_node_to_store = 1
+        self.cluster_size = cluster_size
         self.index_table = {}
-        # TODO: arrumar índices dos data nodes
+        self.data_nodes_addresses = None
+        self.data_nodes = None
+        self.init_data_nodes()
+        self.lock = threading.Lock()
+        #self.sub_score = PubNodesServer(self.data_nodes, self.lock)
+        self.sub_score = SubScore(self.data_nodes, self.lock)
+        self.sub_status = SubStatus(self.data_nodes, self.lock, self.handle_offline_node)
+    
+
+    def init_data_nodes(self):
+        while len(self.data_nodes_addresses) < self.cluster_size:
+            print(f"[STATUS] Buscando endereço(s) de {self.cluster_size} data node(s).")
+            self.data_nodes_addresses = self.name_service_conn.root.lookup_data_nodes(quantity=self.cluster_size)
         self.data_nodes = {node_id: {
                                     'addr': address, 
                                     'conn': None, 
@@ -107,17 +116,10 @@ class Cluster:
                                     'score': None,
                                     }
                                     for node_id, address in self.data_nodes_addresses.items()}
-        self.lock = threading.Lock()
-        self.sub_score = PubNodesServer(self.data_nodes, self.lock)
-        self.sub_score = SubScore(self.data_nodes, self.lock)
-        self.sub_status = SubStatus(self.data_nodes, self.lock, self.handle_offline_node)
-    
+        print('Data nodes:')
+        print(self.data_nodes_addresses)
 
-    def exposed_get_data_nodes_addresses(self):
-        return self.data_nodes_addresses
-
-
-    def connect_cluster(self):
+    def connect_cluster(self): #erase
         """Estabelece conexão com todos os data nodes"""
         for key, value in self.data_nodes.items():
             self.data_nodes[key]['conn'] = self.connect_data_node(value['addr'])
@@ -125,7 +127,7 @@ class Cluster:
         print('[STATUS] Todos os data nodes do cluster foram conectados com sucesso.')
 
 
-    def connect_data_node(self, address, persistent=True):
+    def connect_data_node(self, address, persistent=True): #erase
         data_node_conn = None
         ip, port = address[0], address[1]
         while not data_node_conn:
@@ -144,7 +146,7 @@ class Cluster:
         return data_node_conn
     
     
-    def select_nodes_to_store(self):
+    def select_nodes_to_store(self): # raise
         """
         Seleciona os data nodes para armazenamento de imagens
         Utiliza-se balanceamento de carga pelos recursos de máquina
@@ -160,7 +162,7 @@ class Cluster:
         return storage_nodes
 
 
-    def select_nodes_to_retrieve(self, image_name):
+    def select_nodes_to_retrieve(self, image_name): # raise
         """
         Seleciona os data nodes para armazenamento de imagens
         Utiliza-se balanceamento de carga pelos recursos de máquina
@@ -182,23 +184,28 @@ class Cluster:
         return retrieval_nodes
     
 
-    def image_total_size(self, image_name):
+    def image_total_size(self, image_name): # raise
         total_size = 0
         for shard in self.index_table[image_name]:
             total_size += shard['size']
         return total_size
 
 
-    def init_update_index_table(self, image_name, image_size_division):
+    def init_update_index_table(self, image_name, image_size_division): # raise
         if image_name in self.index_table:
             return False
         # img_01  ->  [[part_0: {'nodes': 3 2 4, 'size': 100}, ...]
         self.index_table[image_name] = [{'nodes': [], 'size': None} \
                                         for _ in range(image_size_division)]
         return True
-            
 
-    def update_index_table(self, image_name, shard_index, shard_size, nodes_id):
+
+    def rollback_update_index_table(self, image_name): #raise
+        if image_name in self.index_table:
+            del self.index_table[image_name]
+
+
+    def update_index_table(self, image_name, shard_index, shard_size, nodes_id): # raise
         """Atualiza a tabela de índices para uma imagem dividida em partes."""
         # img_01  ->  [part_0: {'nodes': 3 2 4, 'size': 100}, ...]
         for node_id in nodes_id:
@@ -228,7 +235,7 @@ class Cluster:
                         self.data_nodes[node_id]['score'] = None
                         return node_id
         return None
-                
+            
 
     def new_storage(self, source_nodes_ids, new_node_id, image_shard_name):
         store_node = self.data_nodes[new_node_id]
@@ -241,7 +248,7 @@ class Cluster:
         image_shard = retrieval_node['conn'].root.retrieve_image_shard(image_shard_name)
         store_node['conn'].root.store_image_shard(image_shard_name, image_shard)
 
-    
+
     def handle_offline_node(self, offline_node_id):
         new_node_id = self.connect_new_data_node(offline_node_id)
         # img_01  ->  [part_0: {'nodes': 3 2 4, 'size': 100}, ...]
@@ -259,3 +266,4 @@ class Cluster:
                     print('image_shard_name =', image_shard_name)
                     self.new_storage(source_nodes_ids, new_node_id, image_shard_name)
                     shard['nodes'].append(new_node_id)
+                    

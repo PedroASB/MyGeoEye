@@ -1,4 +1,4 @@
-import pika, time, json, threading
+import pika, time, json, threading, rpyc
 from addresses import *
 
 
@@ -8,6 +8,9 @@ DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NO
 RECALCULATE_SCORE_INTERVAL = 20 # Tempo em segundos entre cada cálculo de score
 STATUS_WEIGHTS = {"cpu": 0.3, "memory": 0.2, "disk": 0.5}
 
+# Serviço de nomes
+HOST_NAME_SERVICE = 'localhost'
+PORT_NAME_SERVICE = 6000
 
 class Pub:
     EXCHANGE_MONITOR_DATA_NODE_SCORES = 'exchange_monitor_data_node_scores'
@@ -34,9 +37,11 @@ class Pub:
             except KeyboardInterrupt:
                 print("[STATUS] Encerrando monitoramento.")
                 self.connection.close()
+            except Exception:
+                print("[ERRO] Erro de monitoramento.")
 
 
-    def calculate_scores(self):
+    def calculate_scores(self): #erase
         """Verifica o score de cada data node."""
         # nodes_resources[data_node_1] = {'cpu': ..., 'memory': ..., 'disk': ...}
         for node_id, resources in self.nodes_resources.items():
@@ -46,15 +51,19 @@ class Pub:
             self.nodes_scores[node_id] = round((
                 (100 - cpu)    * STATUS_WEIGHTS['cpu'] +
                 (100 - memory) * STATUS_WEIGHTS['memory'] +
-                (100 - disk)   * STATUS_WEIGHTS['disk']
-            ), 3)
+                (100 - disk)   * STATUS_WEIGHTS['disk']), 3)
 
 
-    def notify_subs(self):
+    def notify_subs(self): #erase
         """Envia uma mensagem aos subscribers."""
         message_dict = self.nodes_scores
         message_json = json.dumps(message_dict)
-        self.channel.basic_publish(exchange='', routing_key=self.QUEUE_MONITOR_DATA_NODE_SCORES, body=message_json)
+        while True:
+            try:
+                self.channel.basic_publish(exchange='', routing_key=self.QUEUE_MONITOR_DATA_NODE_SCORES, body=message_json)
+                break
+            except Exception:
+                print("Erro ao publicar")
         print(f"[MONITOR_SCORE] Notificação enviada para {self.QUEUE_MONITOR_DATA_NODE_SCORES}: {message_json}")
 
 
@@ -72,11 +81,14 @@ class Sub:
 
 
     def start_listening(self):
-        self.channel.basic_consume(queue=self.QUEUE_DATA_NODE_RESOURCES, on_message_callback=self.callback_data_nodes_resources, auto_ack=True)
-        self.channel.start_consuming()
+        try:
+            self.channel.basic_consume(queue=self.QUEUE_DATA_NODE_RESOURCES, on_message_callback=self.callback_data_nodes_resources, auto_ack=True)
+            self.channel.start_consuming()
+        except Exception:
+            print("[MONITOR_STATUS] Erro de monitoramento.")
 
 
-    def callback_data_nodes_resources(self, ch, method, properties, body):
+    def callback_data_nodes_resources(self, ch, method, properties, body): #erase
         """Callback para processar mensagens do RabbitMQ."""
         message_dict = json.loads(body)  # Converte a string JSON de volta para um dicionário
         print(f"[MONITOR_SCORE] Notificação recebida: {message_dict}")
@@ -89,6 +101,8 @@ class Sub:
 class MonitorScore:
     def __init__(self):
         # self.data_nodes = DATA_NODES_ADDR
+        self.name_service_conn = rpyc.connect(HOST_NAME_SERVICE, PORT_NAME_SERVICE)
+        self.data_nodes_addresses = self.name_service_conn.root.lookup_data_nodes()
         self.cluster_size = len(DATA_NODES_ADDR)
         self.nodes_resources = {f"data_node_{i+1}": {'cpu': None, 'memory': None, 'disk': None} for i in range(self.cluster_size)}
         self.pub = Pub(self.cluster_size, self.nodes_resources)

@@ -31,7 +31,7 @@ class Client:
                     os.remove(os.path.join(root, file))
 
 
-    def upload_image(self, image_name):
+    def upload_image(self, image_name): # Pode lançar uma exceção
         """Envia uma imagem para o servidor"""
         image_path = os.path.join(self.UPLOAD_DIR, image_name)
         if not os.path.exists(image_path):
@@ -48,7 +48,7 @@ class Client:
         print(f'[STATUS] Imagem "{image_name}" enviada ao servidor.')
 
 
-    def download_image(self, image_name):
+    def download_image(self, image_name): # Pode lançar uma exceção
         image_path = os.path.join(self.DOWNLOAD_DIR, image_name)
         if os.path.exists(image_path):
             print(f'[ERRO] Arquivo de imagem "{image_name}" já existente.')
@@ -72,7 +72,7 @@ class Client:
         print(f'Imagem "{image_name}" armazenada com sucesso em "{self.DOWNLOAD_DIR}/".')
 
 
-    def list_images(self):
+    def list_images(self): # Pode lançar uma exceção
         images_list = self.server_conn.root.list_images()
         if len(images_list) == 0:
             print('\nNão há imagens armazenadas.')
@@ -80,15 +80,15 @@ class Client:
             print('\nLista de imagens:')
             for image in images_list:
                 print(image)
+                    
 
-
-    def delete_image(self, image_name):
+    def delete_image(self, image_name): # Pode lançar uma exceção
         """Deleta uma imagem"""
         if self.server_conn.root.delete_image(image_name):
             print(f'[STATUS] Imagem "{image_name}" deletada no servidor.')
         else:
             print('[ERRO] Imagem não encontrada no servidor.')
-    
+
 
     def start(self, name_server):
         try:
@@ -127,15 +127,27 @@ class Client:
             match command:
                 case '1':
                     image_name = str(input('\nImagem a ser enviada: ')).strip()
-                    self.upload_image(image_name)
+                    try:
+                        self.upload_image(image_name)
+                    except Exception:
+                        print(f'[ERRO] Ocorreu alguma falha durante a execução do comando.')
                 case '2':
                     image_name = str(input('\nImagem a ser baixada: ')).strip()
-                    self.download_image(image_name)
+                    try:
+                        self.download_image(image_name)
+                    except Exception:
+                        print(f'[ERRO] Ocorreu alguma falha durante a execução do comando.')
                 case '3':
-                    self.list_images()
+                    try:
+                        self.list_images()
+                    except Exception:
+                        print(f'[ERRO] Ocorreu alguma falha durante a execução do comando.')
                 case '4':
                     image_name = str(input('\nImagem a ser deletada: ')).strip()
-                    self.delete_image(image_name)
+                    try:
+                        self.delete_image(image_name)
+                    except Exception:
+                        print(f'[ERRO] Ocorreu alguma falha durante a execução do comando.')
                 case '0':
                     break
                 case _:

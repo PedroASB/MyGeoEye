@@ -1,4 +1,4 @@
-import pika, time, json, threading
+import pika, time, json, threading, rpyc
 from copy import deepcopy
 from addresses import *
 
@@ -6,6 +6,9 @@ RABBITMQ_HOST = 'localhost'
 DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR, DATA_NODE_5_ADDR]
 RECALCULATE_STATUS_INTERVAL = 10
 TIMEOUT = 15
+
+HOST_NAME_SERVICE = 'localhost'
+PORT_NAME_SERVICE = 6000
 
 class Pub:
     EXCHANGE_MONITOR_DATA_NODE_STATUS = 'exchange_monitor_data_node_status'
@@ -33,8 +36,10 @@ class Pub:
                         self.notify_subs(changed_nodes)
                 time.sleep(RECALCULATE_STATUS_INTERVAL)  # Intervalo entre as verificações
         except KeyboardInterrupt:
-            print("[MONITOR_STATUS] Encerrando monitoramento...")
+            print("[MONITOR_STATUS] Encerrando monitoramento.")
             self.connection.close()
+        except Exception:
+            print("[MONITOR_STATUS] Erro de monitoramento.")
 
 
     def notify_subs(self, changed_nodes):
@@ -46,7 +51,7 @@ class Pub:
                 self.channel.basic_publish(exchange='', routing_key=self.QUEUE_MONITOR_DATA_NODE_STATUS, body=message_json)
                 break
             except Exception:
-                print("Erro ao publicar")
+                print("[ERRO] Falha ao tentar publicar.")
         print(f"[MONITOR_STATUS] Notificação enviada para {self.QUEUE_MONITOR_DATA_NODE_STATUS}: {message_json}")
 
 
@@ -83,8 +88,11 @@ class Sub:
 
 
     def start_listening(self):
-        self.channel.basic_consume(queue=self.QUEUE_DATA_NODE_STATUS, on_message_callback=self.callback_data_status, auto_ack=True)
-        self.channel.start_consuming()
+        try:
+            self.channel.basic_consume(queue=self.QUEUE_DATA_NODE_STATUS, on_message_callback=self.callback_data_status, auto_ack=True)
+            self.channel.start_consuming()
+        except Exception:
+            print("[MONITOR_STATUS] Erro de monitoramento.")
 
 
     def callback_data_status(self, ch, method, properties, body):
@@ -98,8 +106,11 @@ class Sub:
 
 class MonitorStatus:
     def __init__(self):
+        self.name_service_conn = rpyc.connect(HOST_NAME_SERVICE, PORT_NAME_SERVICE)
+        self.data_nodes_addresses = self.name_service_conn.root.lookup_data_nodes()
         self.cluster_size = len(DATA_NODES_ADDR)
         self.nodes_status = {f"data_node_{i+1}": {'online': False, 'time': None} for i in range(self.cluster_size)}
+
         self.lock = threading.Lock()
 
         self.pub = Pub(self.nodes_status, self.lock)

@@ -114,69 +114,82 @@ class DataNode(rpyc.Service):
                     os.remove(os.path.join(root, file))
 
 
-    def exposed_store_image_chunk(self, image_name, shard_index, image_chunk):
-        # Cria o diretório onde os chunks serão salvos, se necessário
-        image_shard_name = f'{image_name}%part{shard_index}%'
-        image_path = os.path.join(self.STORAGE_DIR, image_shard_name)
-        # Armazena o chunk recebido
-        with open(image_path, "ab") as file:
-            file.write(image_chunk)
+    def exposed_store_image_chunk(self, image_name, shard_index, image_chunk): #try_exception
+        try:
+            # Cria o diretório onde os chunks serão salvos, se necessário
+            image_shard_name = f'{image_name}%part{shard_index}%'
+            image_path = os.path.join(self.STORAGE_DIR, image_shard_name)
+            # Armazena o chunk recebido
+            with open(image_path, "ab") as file:
+                file.write(image_chunk)
+        except Exception:
+            return Exception
 
 
-    def exposed_retrieve_image_chunk(self, image_name, shard_index):
+    def exposed_retrieve_image_chunk(self, image_name, shard_index): #try_exception
         """
         Envia chunks de uma parte de imagem para o servidor de forma incremental.
         """
-        image_shard_name = f'{image_name}%part{shard_index}%'
-        image_path = os.path.join(self.STORAGE_DIR, image_shard_name)
-        
-        # Verificar se o arquivo já está aberto ou não
-        if image_shard_name not in self.open_files:
-            if not os.path.exists(image_path):
-                print(f"[ERRO] {image_name}%part{shard_index}% não encontrada.")
-                return None
-            # Abrir o arquivo e armazenar no mapeamento
-            self.open_files[image_shard_name] = open(image_path, "rb")
+        try:
+            image_shard_name = f'{image_name}%part{shard_index}%'
+            image_path = os.path.join(self.STORAGE_DIR, image_shard_name)
+            
+            # Verificar se o arquivo já está aberto ou não
+            if image_shard_name not in self.open_files:
+                if not os.path.exists(image_path):
+                    print(f"[ERRO] {image_name}%part{shard_index}% não encontrada.")
+                    return None
+                # Abrir o arquivo e armazenar no mapeamento
+                self.open_files[image_shard_name] = open(image_path, "rb")
 
-        file = self.open_files[image_shard_name]
-        image_chunk = file.read(CHUNK_SIZE)
-        eof = False
-        
-        # Significa que temos o último "chunk" ou vazio
-        if len(image_chunk) < CHUNK_SIZE:
-            file.close()
-            del self.open_files[image_shard_name]
-            print(f"[STATUS] Leitura de {image_name}%part{shard_index}% concluída.")
-            eof = True
-        
-        # for of in self.open_files:
-        #     print(of)
-        
-        return image_chunk, eof
-
-
-    def exposed_store_image_shard(self, image_shard_name, image_shard):
-        image_shard_path = os.path.join(self.STORAGE_DIR, image_shard_name)
-        with open(image_shard_path, "wb") as file:
-            file.write(image_shard)
+            file = self.open_files[image_shard_name]
+            image_chunk = file.read(CHUNK_SIZE)
+            eof = False
+            
+            # Significa que temos o último "chunk" ou vazio
+            if len(image_chunk) < CHUNK_SIZE:
+                file.close()
+                del self.open_files[image_shard_name]
+                print(f"[STATUS] Leitura de {image_name}%part{shard_index}% concluída.")
+                eof = True
+            
+            # for of in self.open_files:
+            #     print(of)
+            
+            return image_chunk, eof
+        except Exception:
+            return Exception
 
 
-    def exposed_retrieve_image_shard(self, image_shard_name):
-        image_shard_path = os.path.join(self.STORAGE_DIR, image_shard_name)
-        with open(image_shard_path, "rb") as file:
-            image_shard = file.read(SHARD_SIZE)
-        return image_shard
+    def exposed_store_image_shard(self, image_shard_name, image_shard): #try_exception
+        try:
+            image_shard_path = os.path.join(self.STORAGE_DIR, image_shard_name)
+            with open(image_shard_path, "wb") as file:
+                file.write(image_shard)
+        except Exception:
+            return Exception
+
+    def exposed_retrieve_image_shard(self, image_shard_name): #try_exception
+        try:
+            image_shard_path = os.path.join(self.STORAGE_DIR, image_shard_name)
+            with open(image_shard_path, "rb") as file:
+                image_shard = file.read(SHARD_SIZE)
+            return image_shard
+        except Exception:
+            return Exception
 
 
-    def exposed_delete_image(self, image_name, shard_index):
-        image_shard_name = f'{image_name}%part{shard_index}%'
-        image_path = os.path.join(self.STORAGE_DIR, image_shard_name)
-        if os.path.exists(image_path):
-            os.remove(image_path)
-            print(f'[STATUS] Fragmento de imagem "{image_shard_name}" deletado com sucesso.')
-        else:
-            print(f'[STATUS] Fragmento de imagem "{image_shard_name}" não encontrado para deletar.')
-
+    def exposed_delete_image(self, image_name, shard_index): #try_exception
+        try:
+            image_shard_name = f'{image_name}%part{shard_index}%'
+            image_path = os.path.join(self.STORAGE_DIR, image_shard_name)
+            if os.path.exists(image_path):
+                os.remove(image_path)
+                print(f'[STATUS] Fragmento de imagem "{image_shard_name}" deletado com sucesso.')
+            else:
+                print(f'[STATUS] Fragmento de imagem "{image_shard_name}" não encontrado para deletar.')
+        except Exception:
+                    return Exception
 
     def start(self):
         main_thread = threading.Thread(target=self.start_data_node, daemon=True)
