@@ -1,8 +1,10 @@
-import rpyc, re
+import re
 from itertools import islice
+
+import rpyc
 from rpyc.utils.server import ThreadedServer
 
-HOST_NAME_SERVICE = 'localhost'
+HOST_NAME_SERVICE = '192.168.40.46' #'localhost'
 PORT_NAME_SERVICE = 6000
 
 class NameService(rpyc.Service):

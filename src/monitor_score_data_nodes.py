@@ -1,15 +1,16 @@
 import pika, time, json, threading, rpyc
-from addresses import *
+#from addresses import *
 
 
-RABBITMQ_HOST = 'localhost'
+RABBITMQ_HOST_SERVER = '192.168.40.117'
+#RABBITMQ_HOST = '192.168.40.137'
 
-DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR, DATA_NODE_5_ADDR]
+#DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR, DATA_NODE_5_ADDR]
 RECALCULATE_SCORE_INTERVAL = 20 # Tempo em segundos entre cada cálculo de score
 STATUS_WEIGHTS = {"cpu": 0.3, "memory": 0.2, "disk": 0.5}
 
 # Serviço de nomes
-HOST_NAME_SERVICE = 'localhost'
+HOST_NAME_SERVICE = '192.168.40.46'
 PORT_NAME_SERVICE = 6000
 
 class Pub:
@@ -17,7 +18,7 @@ class Pub:
     QUEUE_MONITOR_DATA_NODE_SCORES = 'queue_monitor_data_node_scores'  # Nome da fila específica para este monitor
 
     def __init__(self, cluster_size, nodes_resources):
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
         self.channel = self.connection.channel()
         self.channel.exchange_declare(exchange=self.EXCHANGE_MONITOR_DATA_NODE_SCORES, exchange_type='fanout')
         self.channel.queue_declare(queue=self.QUEUE_MONITOR_DATA_NODE_SCORES)
@@ -72,7 +73,7 @@ class Sub:
     QUEUE_DATA_NODE_RESOURCES = 'queue_data_node_resources'
 
     def __init__(self, nodes_resources):
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
         self.channel = self.connection.channel()
         self.channel.exchange_declare(exchange=self.EXCHANGE_DATA_NODE_RESOURCES, exchange_type='fanout')
         self.channel.queue_declare(queue=self.QUEUE_DATA_NODE_RESOURCES)
@@ -103,7 +104,7 @@ class MonitorScore:
         # self.data_nodes = DATA_NODES_ADDR
         self.name_service_conn = rpyc.connect(HOST_NAME_SERVICE, PORT_NAME_SERVICE)
         self.data_nodes_addresses = self.name_service_conn.root.lookup_data_nodes()
-        self.cluster_size = len(DATA_NODES_ADDR)
+        self.cluster_size = len(self.data_nodes_addresses)
         self.nodes_resources = {f"data_node_{i+1}": {'cpu': None, 'memory': None, 'disk': None} for i in range(self.cluster_size)}
         self.pub = Pub(self.cluster_size, self.nodes_resources)
         self.sub = Sub(self.nodes_resources)

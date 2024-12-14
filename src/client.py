@@ -4,7 +4,7 @@ import rpyc, time, os
 NAME_SERVER = 'geoeye_images'
 
 # Serviço de nomes
-HOST_NAME_SERVICE = 'localhost'
+HOST_NAME_SERVICE = '192.168.40.223'
 PORT_NAME_SERVICE = 6000
 
 # Tamanho de chunks
@@ -62,9 +62,6 @@ class Client:
             received_size = 0
             while received_size < image_size:
                 image_chunk = self.server_conn.root.download_image_chunk()
-                if image_chunk == 'error':
-                    print('Erro!')
-                    break
                 if image_chunk is None:
                     break
                 file.write(image_chunk)
@@ -128,13 +125,19 @@ class Client:
                 case '1':
                     image_name = str(input('\nImagem a ser enviada: ')).strip()
                     try:
+                        time_start = time.time()
                         self.upload_image(image_name)
+                        time_end = time.time()
+                        print(f"Tempo de upload: {(time_end - time_start)} s")
                     except Exception:
                         print(f'[ERRO] Ocorreu alguma falha durante a execução do comando.')
                 case '2':
                     image_name = str(input('\nImagem a ser baixada: ')).strip()
                     try:
+                        time_start = time.time()
                         self.download_image(image_name)
+                        time_end = time.time()
+                        print(f"Tempo de download: {(time_end - time_start)} s")
                     except Exception:
                         print(f'[ERRO] Ocorreu alguma falha durante a execução do comando.')
                 case '3':
@@ -146,6 +149,11 @@ class Client:
                     image_name = str(input('\nImagem a ser deletada: ')).strip()
                     try:
                         self.delete_image(image_name)
+                    except Exception:
+                        print(f'[ERRO] Ocorreu alguma falha durante a execução do comando.')
+                case '5':
+                    try:
+                        self.server_conn.root.debug_info()
                     except Exception:
                         print(f'[ERRO] Ocorreu alguma falha durante a execução do comando.')
                 case '0':

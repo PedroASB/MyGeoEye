@@ -1,6 +1,8 @@
 import rpyc, time, pika, json, threading
+from copy import deepcopy
 
-RABBITMQ_HOST = 'localhost'
+RABBITMQ_HOST_MONITOR_SCORE = '192.168.40.137'
+RABBITMQ_HOST_MONITOR_STATUS = '192.168.40.244'
 BASE_SCORE = 42
 
 # class PubNodesServer:
@@ -28,7 +30,7 @@ class SubScore:
     QUEUE_MONITOR_DATA_NODE_SCORES = 'queue_monitor_data_node_scores'
 
     def __init__(self, data_nodes, lock):
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST_MONITOR_SCORE))
         self.channel = self.connection.channel()
         self.channel.exchange_declare(exchange=self.EXCHANGE_MONITOR_DATA_NODE_SCORES, exchange_type='fanout')
         self.channel.queue_declare(queue=self.QUEUE_MONITOR_DATA_NODE_SCORES)
@@ -59,7 +61,7 @@ class SubStatus:
     QUEUE_MONITOR_DATA_NODE_STATUS = 'queue_monitor_data_node_status'
 
     def __init__(self, data_nodes, lock, handle_offline_node):
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST_MONITOR_STATUS))
         self.channel = self.connection.channel()
         self.channel.exchange_declare(exchange=self.EXCHANGE_MONITOR_DATA_NODE_STATUS, exchange_type='fanout')
         self.channel.queue_declare(queue=self.QUEUE_MONITOR_DATA_NODE_STATUS)
@@ -96,7 +98,7 @@ class Cluster: #raise
         self.name_service_conn = name_service_conn
         self.cluster_size = cluster_size
         self.index_table = {}
-        self.data_nodes_addresses = None
+        self.data_nodes_addresses = []
         self.data_nodes = None
         self.init_data_nodes()
         self.lock = threading.Lock()
@@ -112,8 +114,8 @@ class Cluster: #raise
         self.data_nodes = {node_id: {
                                     'addr': address, 
                                     'conn': None, 
-                                    'online': None,
-                                    'score': None,
+                                    'online': False,
+                                    'score': 50, # TODO: COLOCAR NONE AQUI
                                     }
                                     for node_id, address in self.data_nodes_addresses.items()}
         print('Data nodes:')
@@ -151,14 +153,15 @@ class Cluster: #raise
         Seleciona os data nodes para armazenamento de imagens
         Utiliza-se balanceamento de carga pelos recursos de máquina
         """
-        scored_nodes = [node_id for node_id in self.data_nodes if \
-                        self.data_nodes[node_id]['online'] and \
-                        None != self.data_nodes[node_id]['score'] >= BASE_SCORE]
-        scored_nodes.sort(key=lambda x: x[1], reverse=True)
-        storage_nodes = [node_id for node_id in scored_nodes]
-        if len(storage_nodes) < self.replication_factor:
-            storage_nodes = [node_id for node_id, _ in scored_nodes[:self.replication_factor]]
-        print(f'[INFO] Data nodes selecionados para armazenamento: {storage_nodes}')
+        with self.lock:
+            scored_nodes = [node_id for node_id in self.data_nodes if \
+                            self.data_nodes[node_id]['online'] and \
+                            None != self.data_nodes[node_id]['score'] >= BASE_SCORE]
+            scored_nodes.sort(key=lambda x: x[1], reverse=True)
+            storage_nodes = [node_id for node_id in scored_nodes]
+            if len(storage_nodes) < self.replication_factor:
+                storage_nodes = [node_id for node_id, _ in scored_nodes[:self.replication_factor]]
+            print(f'[INFO] Data nodes com score suficiente para armazenamento: {storage_nodes}')
         return storage_nodes
 
 
@@ -168,19 +171,20 @@ class Cluster: #raise
         Utiliza-se balanceamento de carga pelos recursos de máquina
         """
         # img_01  ->  [[part_0: {'nodes': 3 2 4, 'size': 100}, ...]
-        retrieval_nodes = []
-        for shard in self.index_table[image_name]:
-            # shard => {'nodes': 3 2 4, 'size': 100}
-            # sorted([(id, 5), (id, 3), (id, 2)])
-            scored_nodes = [
-                node_id for node_id, _ in sorted(
-                    ((node_id, self.data_nodes[node_id]['score']) for node_id in shard['nodes']),
-                    key=lambda x: x[1],
-                    reverse=True
-                )
-            ]
-            retrieval_nodes.append(scored_nodes[0])
-        print(f'\nretrieval_nodes to "{image_name}" =', retrieval_nodes)
+        with self.lock:
+            retrieval_nodes = []
+            for shard in self.index_table[image_name]:
+                # shard => {'nodes': 3 2 4, 'size': 100}
+                # sorted([(id, 5), (id, 3), (id, 2)])
+                scored_nodes = [
+                    node_id for node_id, _ in sorted(
+                        ((node_id, self.data_nodes[node_id]['score']) for node_id in shard['nodes']),
+                        key=lambda x: x[1],
+                        reverse=True
+                    )
+                ]
+                retrieval_nodes.append(scored_nodes[0])
+            print(f'\nretrieval_nodes to "{image_name}" =', retrieval_nodes)
         return retrieval_nodes
     
 
@@ -192,6 +196,7 @@ class Cluster: #raise
 
 
     def init_update_index_table(self, image_name, image_size_division): # raise
+        # print('[INFO] Init da tabela de índices no cluster.')
         if image_name in self.index_table:
             return False
         # img_01  ->  [[part_0: {'nodes': 3 2 4, 'size': 100}, ...]
@@ -201,17 +206,20 @@ class Cluster: #raise
 
 
     def rollback_update_index_table(self, image_name): #raise
+        # print('[INFO] Realizando rollback da tabela de índices.')
         if image_name in self.index_table:
             del self.index_table[image_name]
 
 
     def update_index_table(self, image_name, shard_index, shard_size, nodes_id): # raise
         """Atualiza a tabela de índices para uma imagem dividida em partes."""
+        # print('[INFO] Atualizando a tabela de índices no cluster.')
         # img_01  ->  [part_0: {'nodes': 3 2 4, 'size': 100}, ...]
-        for node_id in nodes_id:
-            if node_id not in self.index_table[image_name][shard_index]:
-                self.index_table[image_name][shard_index]['nodes'].append(node_id)
-        self.index_table[image_name][shard_index]['size'] = shard_size
+        with self.lock:
+            for node_id in nodes_id:
+                if node_id not in self.index_table[image_name][shard_index]:
+                    self.index_table[image_name][shard_index]['nodes'].append(node_id)
+            self.index_table[image_name][shard_index]['size'] = shard_size
         # print('index_table:')
         # for k, v in self.index_table.items():
         #     print(f'{k}: {v}')
@@ -256,14 +264,28 @@ class Cluster: #raise
             # img_0 -> [part_0: {'nodes': 3 2 4, 'size': 100}, ...]
             # img_1 -> [part_0: {'nodes': 1 9 4, 'size': 100}, ...]
             # img_2 -> [part_0: {'nodes': 7 8 3, 'size': 100}, ...]
+            lost_shard = False
             for shard_index, shard in enumerate(registry):
                 # [part_0: {'nodes': 7 8 3, 'size': 100}, ...]
                 if offline_node_id in shard['nodes']:
                     # 'nodes:' [2 3 4* 5]
-                    shard['nodes'].remove(offline_node_id)
-                    source_nodes_ids = shard['nodes'][:]
-                    image_shard_name = f'{image_name}%part{shard_index}%'
-                    print('image_shard_name =', image_shard_name)
-                    self.new_storage(source_nodes_ids, new_node_id, image_shard_name)
-                    shard['nodes'].append(new_node_id)
+                    shard['nodes'].remove(offline_node_id) # isolar da tabela de índices
+                    if (len(shard['nodes']) >= 1): # instanciar um novo data node
+                        source_nodes_ids = shard['nodes'][:]
+                        image_shard_name = f'{image_name}%part{shard_index}%'
+                        print('image_shard_name =', image_shard_name)
+                        self.new_storage(source_nodes_ids, new_node_id, image_shard_name)
+                        shard['nodes'].append(new_node_id)
+                    else:
+                        lost_shard = True
+            if lost_shard:
+                print(f'[INFO] Não há uma replicação disponível para restaurar "{image_name}". Retirando a imagem da tabela de índices.')
+                self.index_table[image_name] = None
+            else:
+                print(f'[INFO] A imagem "{image_name}" foi restaurada com sucesso.')
+        for image_name, registry in deepcopy(self.index_table).items():
+            if registry is None:
+                del self.index_table[image_name]
+            
+
                     

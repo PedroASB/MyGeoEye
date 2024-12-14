@@ -2,28 +2,30 @@ import rpyc, os, time, pika, json, psutil, threading
 from rpyc.utils.server import ThreadedServer
 
 # Data node
-INDEX = 0
+INDEX = 1
 PORT_DATA_NODE = 8000 + INDEX
-HOST_DATA_NODE = 'localhost'
+HOST_DATA_NODE = '192.168.40.111' # 'localhost'
 NAME_DATA_NODE = f'data_node_{INDEX}'
 
 # Serviço de nomes
-HOST_NAME_SERVICE = 'localhost'
+HOST_NAME_SERVICE = '192.168.40.223' # 'localhost'
 PORT_NAME_SERVICE = 6000
+
+# RabbitMQ
+RABBITMQ_HOST_MONITOR_STATUS = '192.168.40.244' # 'localhost'
+RABBITMQ_HOST_MONITOR_SCORE = '192.168.40.137' # 'localhost'
 
 # Tamanho de chunks / fragmentos
 CHUNK_SIZE = 65_536     # 64 KB
 SHARD_SIZE = 2_097_152  # 2 MB
 
-
 class PubResources:
-    RABBITMQ_HOST = 'localhost'
     QUEUE_DATA_NODE_RESOURCES = 'queue_data_node_resources'  # Nome da fila específica para este data node
     EXCHANGE_DATA_NODE_RESOURCES = 'exchange_data_node_resources'
     VERIFICATION_INTERVAL = 20 # Tempo em segundos entre cada verificação
 
     def __init__(self):
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.RABBITMQ_HOST))
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST_MONITOR_SCORE))
         self.channel = self.connection.channel()
         # Declara a fila única para este monitor
         self.channel.exchange_declare(exchange=self.EXCHANGE_DATA_NODE_RESOURCES, exchange_type='fanout')
@@ -59,13 +61,12 @@ class PubResources:
 
 
 class PubStatus:
-    RABBITMQ_HOST = 'localhost'
     EXCHANGE_DATA_NODE_STATUS = 'exchange_data_node_status'
     QUEUE_DATA_NODE_STATUS = 'queue_data_node_status'  # Nome da fila específica para este data node
     VERIFICATION_INTERVAL = 10 # Tempo em segundos entre cada verificação
 
     def __init__(self):
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.RABBITMQ_HOST))
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST_MONITOR_STATUS))
         self.channel = self.connection.channel()
         # Declara a fila única para este monitor
         self.channel.exchange_declare(exchange=self.EXCHANGE_DATA_NODE_STATUS, exchange_type='fanout')
@@ -122,8 +123,9 @@ class DataNode(rpyc.Service):
             # Armazena o chunk recebido
             with open(image_path, "ab") as file:
                 file.write(image_chunk)
-        except Exception:
-            return Exception
+        except Exception as exception:
+            print('[ERRO] Erro em exposed_store_image_chunk')
+            raise exception
 
 
     def exposed_retrieve_image_chunk(self, image_name, shard_index): #try_exception
@@ -157,8 +159,15 @@ class DataNode(rpyc.Service):
             #     print(of)
             
             return image_chunk, eof
-        except Exception:
-            return Exception
+        except Exception as exception:
+            print('[ERRO] Erro em exposed_retrieve_image_chunk')
+            try:
+                file.close()
+            except Exception:
+                pass
+            if image_shard_name in self.open_files:
+                del self.open_files[image_shard_name]
+            raise exception
 
 
     def exposed_store_image_shard(self, image_shard_name, image_shard): #try_exception
@@ -166,8 +175,10 @@ class DataNode(rpyc.Service):
             image_shard_path = os.path.join(self.STORAGE_DIR, image_shard_name)
             with open(image_shard_path, "wb") as file:
                 file.write(image_shard)
-        except Exception:
-            return Exception
+        except Exception as exception:
+            print('[ERRO] Erro em exposed_store_image_shard')
+            raise exception
+
 
     def exposed_retrieve_image_shard(self, image_shard_name): #try_exception
         try:
@@ -175,8 +186,9 @@ class DataNode(rpyc.Service):
             with open(image_shard_path, "rb") as file:
                 image_shard = file.read(SHARD_SIZE)
             return image_shard
-        except Exception:
-            return Exception
+        except Exception as exception:
+            print('[ERRO] Erro em exposed_retrieve_image_shard')
+            raise exception
 
 
     def exposed_delete_image(self, image_name, shard_index): #try_exception
@@ -188,8 +200,9 @@ class DataNode(rpyc.Service):
                 print(f'[STATUS] Fragmento de imagem "{image_shard_name}" deletado com sucesso.')
             else:
                 print(f'[STATUS] Fragmento de imagem "{image_shard_name}" não encontrado para deletar.')
-        except Exception:
-                    return Exception
+        except Exception as exception:
+            print('[ERRO] Erro em exposed_delete_image')
+            raise exception
 
     def start(self):
         main_thread = threading.Thread(target=self.start_data_node, daemon=True)

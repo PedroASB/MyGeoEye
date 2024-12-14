@@ -1,17 +1,18 @@
-import rpyc, math, threading, sys, time
+import rpyc, math, threading, sys, time, os
 from itertools import cycle, islice
 from rpyc.utils.server import ThreadedServer
 from cluster import *
-from addresses import *
+import concurrent.futures
+# from addresses import *
 
 
 # Servidor
 NAME_SERVER = 'geoeye_images'
-HOST_SERVER = 'localhost'
+HOST_SERVER = '192.168.40.117' # 'localhost'
 PORT_SERVER = 5000
 
 # Serviço de nomes
-HOST_NAME_SERVICE = 'localhost'
+HOST_NAME_SERVICE = '192.168.40.223' # 'localhost'
 PORT_NAME_SERVICE = 6000
 
 # Tamanho de chunks / fragmentos
@@ -19,9 +20,9 @@ CHUNK_SIZE = 65_536     # 64 KB
 SHARD_SIZE = 2_097_152  # 2 MB
 
 
-DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR]
-CLUSTER_SIZE = 4 # Quantidade total de data nodes
-REPLICATION_FACTOR = 2 # Fator de réplica
+# DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR]
+CLUSTER_SIZE = 1 # Quantidade total de data nodes
+REPLICATION_FACTOR = 1 # Fator de réplica
 
 
 # TODO: criar uma classe "buffer" para armazenar variáveis 'current'
@@ -34,23 +35,30 @@ class Server(rpyc.Service):
         self.current_image_size_division = None
         self.current_shard_accumulated_size = None
         self.current_image_accumulated_size = None
+        self.current_complete_image = None
         self.round_robin_nodes = None
         self.selected_nodes = None
+        self.open_files = {}
 
         self.host = host
         self.port = port
         self.cluster = cluster
+        self.lock = cluster.lock
         self.replication_factor = self.cluster.replication_factor
+        assert self.cluster.cluster_size >= self.replication_factor,\
+                "'cluster_size' deve ser maior ou igual do que 'replication_factor'"
         self.cluster.connect_cluster()
         print('\n[STATUS] Servidor inicializado com o cluster.')
 
 
     def on_connect(self, conn):
-        print("[STATUS] Cliente conectado.")
+        client_host = conn._channel.stream.sock.getpeername()[0]
+        print(f"[STATUS] Cliente conectado: '{client_host}'")
 
 
     def on_disconnect(self, conn):
-        print("[STATUS] Cliente desconectado.")
+        client_host = conn._channel.stream.sock.getpeername()[0]
+        print(f"[STATUS] Cliente desconectado: '{client_host}'")
 
 
     def exposed_init_upload_image_chunk(self, image_name, image_size): #try_exception
@@ -68,19 +76,17 @@ class Server(rpyc.Service):
                 return False, "[ERRO] Nome de imagem já existente."
 
             # Seleciona os nós para o armazenamento
-            self.round_robin_nodes = cycle(self.cluster.select_nodes_to_store())
-            
+            storage_nodes = self.cluster.select_nodes_to_store()
+            self.round_robin_nodes = cycle(storage_nodes)
+
             # Seleciona os primeiros nós para a parte inicial da imagem
             self.selected_nodes = list(islice(self.round_robin_nodes, self.replication_factor))
+            print(f'[INFO] "{self.current_image_name}" / fragmento {self.current_shard_index} / armazenando em {self.selected_nodes}')
             
             return True, None
-            # print(f'image_size = {image_size}, division = {image_size / SHARD_SIZE}')
-            # print(f'current_image_size_division = {self.current_image_size_division}')
-            # print('current_storage_nodes:', end=' ')
-            # for n in self.current_storage_nodes:
-            #     print(n, end=' ')
-            # print()
         except Exception as exception:
+            print('[ERRO] Erro em exposed_init_upload_image_chunk')
+            print('exception =', exception)
             self.cluster.rollback_update_index_table(self.current_image_name)
             raise exception
 
@@ -93,6 +99,7 @@ class Server(rpyc.Service):
                 self.current_shard_accumulated_size = 0
                 self.current_shard_index += 1
                 self.selected_nodes = list(islice(self.round_robin_nodes, self.replication_factor))
+                print(f'[INFO] "{self.current_image_name}" / fragmento {self.current_shard_index} / armazenando em {self.selected_nodes}')
 
             self.current_shard_accumulated_size += image_chunk_size
             self.current_image_accumulated_size += image_chunk_size
@@ -105,17 +112,21 @@ class Server(rpyc.Service):
                 node = self.cluster.data_nodes[node_id]
                 node['conn'].root.store_image_chunk(self.current_image_name,
                                                     self.current_shard_index, image_chunk)
+
         except Exception as exception:
+            print('[ERRO] Erro em exposed_upload_image_chunk')
+            print('exception =', exception)
             self.cluster.rollback_update_index_table(self.current_image_name)
             raise exception
 
 
     def update_index_table(self): # raise
+        # print('[INFO] Acessando o cluster para atualizar a tabela de índices.')
         self.cluster.update_index_table(self.current_image_name, # img_01 
-                                        self.current_shard_index, # part_0
-                                        self.current_shard_accumulated_size, # 1.999 MB 
-                                        self.selected_nodes) # [1 2]
-        
+                                    self.current_shard_index, # part_0
+                                    self.current_shard_accumulated_size, # 1.999 MB 
+                                    self.selected_nodes) # [1 2]
+    
 
     def exposed_init_download_image_chunk(self, image_name):  #try_exception
         try:
@@ -127,12 +138,16 @@ class Server(rpyc.Service):
             self.current_image_size = self.cluster.image_total_size(image_name)
             print(f'\n"{self.current_image_name}" - Parte {self.current_shard_index}')
             print(f'Selected node: {self.selected_nodes[self.current_shard_index]}')
+            start_time = time.time()
+            self.download_image_complete()
+            end_time = time.time()
+            print(f"[INFO] Tempo de construção da imagem no servidor na RAM: {(end_time - start_time)} s")
             return True, None, self.current_image_size
         except Exception as exception:
             raise exception
 
 
-    def exposed_download_image_chunk(self): #try_exception
+    def exposed_download_image_chunk_old(self): #try_exception
         try:
             if self.current_shard_index < len(self.selected_nodes):
                 image_chunk, eof = self.fetch_image_chunk()
@@ -148,6 +163,40 @@ class Server(rpyc.Service):
             return image_chunk
         except Exception as exception:
             raise exception
+        
+    
+    def exposed_download_image_chunk(self): #try_exception
+        try:
+            # image_shard_name = f'{image_name}%part{shard_index}%'
+            # image_path = os.path.join(self.STORAGE_DIR, image_shard_name)
+            image_path = self.current_image_name
+            
+            # Verificar se o arquivo já está aberto ou não
+            if self.current_image_name not in self.open_files:
+                if not os.path.exists(image_path):
+                    print(f"[ERRO] {self.current_image_name} não encontrado.")
+                    return None
+                self.open_files[self.current_image_name] = open(image_path, "rb")
+
+            file = self.open_files[self.current_image_name]
+            image_chunk = file.read(CHUNK_SIZE)
+            
+            # Significa que temos o último "chunk" ou vazio
+            if len(image_chunk) < CHUNK_SIZE:
+                file.close()
+                del self.open_files[self.current_image_name]
+            
+            return image_chunk
+        except Exception as exception:
+            print('[ERRO] Erro em exposed_retrieve_image_chunk')
+            print('exception =', exception)
+            try:
+                file.close()
+            except Exception:
+                pass
+            if self.current_image_name in self.open_files:
+                del self.open_files[self.current_image_name]
+            raise exception
 
 
     def fetch_image_chunk(self): # raise
@@ -156,20 +205,72 @@ class Server(rpyc.Service):
         node = self.cluster.data_nodes[node_id]
         image_chunk, eof = node['conn'].root.retrieve_image_chunk(self.current_image_name, index)
         return image_chunk, eof
-        
+    
+
+    def download_image_complete(self):  #try_exception
+        try:
+            # Verifica se a imagem existe
+            if self.current_image_name not in self.cluster.index_table:
+                return False, "[ERRO] Imagem não encontrada."
+
+            # Lista de shards para serem baixados
+            shard_indices = range(len(self.selected_nodes))
+            
+            # Função auxiliar para baixar um shard
+            def download_shard(index):
+                node_id = self.selected_nodes[index]
+                node = self.cluster.data_nodes[node_id]
+                image_shard_name = f'{self.current_image_name}%part{index}%'
+                image_shard = node['conn'].root.retrieve_image_shard(image_shard_name)
+                return index, image_shard  # Retorna o índice e o shard baixado
+            
+            # Armazena os shards baixados
+            downloaded_shards = {}
+
+            # Cria um pool de threads para download paralelo
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future_to_shard = {executor.submit(download_shard, index): index for index in shard_indices}
+                for future in concurrent.futures.as_completed(future_to_shard):
+                    index, shard_data = future.result()
+                    downloaded_shards[index] = shard_data
+            
+            # Ordena os shards pela ordem do índice
+            ordered_shards = [downloaded_shards[i] for i in sorted(downloaded_shards.keys())]
+            
+            # Concatena os shards em uma única sequência de bytes
+            self.current_complete_image = b"".join(ordered_shards)
+
+            image_path = self.current_image_name
+            with open(image_path, "wb") as file:
+                file.write(self.current_complete_image)
+            
+            # return self.current_complete_image
+        except Exception as exception:
+            print('[ERRO] Erro em exposed_download_image_complete.')
+            print('exception =', exception)
+            raise exception
+
+    
 
     def exposed_list_images(self):  #try_exception
+        """Lista todas as imagens que estão armazenadas"""
+        try:
+            return list(self.cluster.index_table.keys())
+        except Exception as exception:
+            raise exception
+
+
+    def exposed_debug_info(self):  #try_exception
         """Lista todas as imagens que estão armazenadas"""
         try:
             # TODO: remover este trecho:
             print('-----------[DATA NODES INFO]-----------')
             for node_id, info in self.cluster.data_nodes.items():
-                print(f'{node_id}: online={info['online']}, score={info['score']}')
+                print(f"{node_id}: online={info['online']}, score={info['score']}")
             print('-------------[INDEX TABLE]-------------')
             for k, v in self.cluster.index_table.items():
                 print(k, v)
             print('---------------------------------------')
-            return list(self.cluster.index_table.keys())
         except Exception as exception:
             raise exception
 
@@ -240,5 +341,5 @@ if __name__ == "__main__":
     except ConnectionRefusedError:
         print('[ERRO] Não foi possível estabelecer conexão com o serviço de nomes.')
         sys.exit(0)
-    except Exception:
-        print('[ERRO] Alguma falha ocorreu nos sistemas do servidor.')
+    # except Exception:
+        # print('[ERRO] Alguma falha ocorreu nos sistemas do servidor.')
