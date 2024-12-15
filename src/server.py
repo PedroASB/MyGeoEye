@@ -10,11 +10,11 @@ global_lock = threading.Lock()
 
 # Servidor
 NAME_SERVER = 'geoeye_images'
-HOST_SERVER = '192.168.40.30' # 'localhost'
+HOST_SERVER = 'localhost'
 PORT_SERVER = 5000
 
 # Serviço de nomes
-HOST_NAME_SERVICE = '192.168.40.38' # 'localhost'
+HOST_NAME_SERVICE = 'localhost'
 PORT_NAME_SERVICE = 6000
 
 # Tamanho de chunks / fragmentos
@@ -61,18 +61,14 @@ class Server(rpyc.Service):
     def on_disconnect(self, conn):
         client_host = conn._channel.stream.sock.getpeername()[0]
         print(f"[STATUS] Cliente desconectado: '{client_host}'")
+        self.exposed_release_lock()
 
 
     def exposed_acquire_lock(self):
-        print("Cliente pediu o lock.")
         global_lock.acquire()
-        print("Lock adquirido pelo cliente.")
-        return "Lock adquirido. Você pode fazer seu trabalho agora."
         
     def exposed_release_lock(self):
         global_lock.release()
-        print("Lock liberado pelo cliente.")
-        return "Lock liberado."
     
     def exposed_init_upload_image_chunk(self, image_name, image_size): #try_exception
         try:
@@ -101,6 +97,7 @@ class Server(rpyc.Service):
             print('[ERRO] Erro em exposed_init_upload_image_chunk')
             print('exception =', exception)
             self.cluster.rollback_update_index_table(self.current_image_name)
+            self.exposed_release_lock()
             raise exception
 
 
@@ -130,6 +127,7 @@ class Server(rpyc.Service):
             print('[ERRO] Erro em exposed_upload_image_chunk')
             print('exception =', exception)
             self.cluster.rollback_update_index_table(self.current_image_name)
+            self.exposed_release_lock()
             raise exception
 
 
@@ -157,6 +155,7 @@ class Server(rpyc.Service):
             print(f"[INFO] Tempo de construção da imagem no servidor na RAM: {(end_time - start_time)} s")
             return True, None, self.current_image_size
         except Exception as exception:
+            self.exposed_release_lock()
             raise exception
 
 
@@ -175,6 +174,7 @@ class Server(rpyc.Service):
                 
             return image_chunk
         except Exception as exception:
+            self.exposed_release_lock()
             raise exception
         
     
@@ -184,7 +184,6 @@ class Server(rpyc.Service):
             # image_path = os.path.join(self.STORAGE_DIR, image_shard_name)
             image_path = self.current_image_name
             
-            # Verificar se o arquivo já está aberto ou não
             if self.current_image_name not in self.open_files:
                 if not os.path.exists(image_path):
                     print(f"[ERRO] {self.current_image_name} não encontrado.")
@@ -194,11 +193,12 @@ class Server(rpyc.Service):
             file = self.open_files[self.current_image_name]
             image_chunk = file.read(CHUNK_SIZE)
             
-            # Significa que temos o último "chunk" ou vazio
             if len(image_chunk) < CHUNK_SIZE:
                 file.close()
                 del self.open_files[self.current_image_name]
-            
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+                
             return image_chunk
         except Exception as exception:
             print('[ERRO] Erro em exposed_retrieve_image_chunk')
@@ -209,6 +209,7 @@ class Server(rpyc.Service):
                 pass
             if self.current_image_name in self.open_files:
                 del self.open_files[self.current_image_name]
+            self.exposed_release_lock()
             raise exception
 
 
@@ -222,48 +223,40 @@ class Server(rpyc.Service):
 
     def download_image_complete(self):  #try_exception
         try:
-            # Verifica se a imagem existe
             if self.current_image_name not in self.cluster.index_table:
                 return False, "[ERRO] Imagem não encontrada."
 
-            # Lista de shards para serem baixados
             shard_indices = range(len(self.selected_nodes))
             
-            # Função auxiliar para baixar um shard
             def download_shard(index):
                 node_id = self.selected_nodes[index]
                 node = self.cluster.data_nodes[node_id]
                 image_shard_name = f'{self.current_image_name}%part{index}%'
                 image_shard = node['conn'].root.retrieve_image_shard(image_shard_name)
-                return index, image_shard  # Retorna o índice e o shard baixado
+                return index, image_shard
             
-            # Armazena os shards baixados
             downloaded_shards = {}
 
-            # Cria um pool de threads para download paralelo
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future_to_shard = {executor.submit(download_shard, index): index for index in shard_indices}
                 for future in concurrent.futures.as_completed(future_to_shard):
                     index, shard_data = future.result()
                     downloaded_shards[index] = shard_data
             
-            # Ordena os shards pela ordem do índice
             ordered_shards = [downloaded_shards[i] for i in sorted(downloaded_shards.keys())]
             
-            # Concatena os shards em uma única sequência de bytes
             self.current_complete_image = b"".join(ordered_shards)
 
             image_path = self.current_image_name
             with open(image_path, "wb") as file:
                 file.write(self.current_complete_image)
             
-            # return self.current_complete_image
         except Exception as exception:
             print('[ERRO] Erro em exposed_download_image_complete.')
             print('exception =', exception)
+            self.exposed_release_lock()
             raise exception
 
-    
 
     def exposed_list_images(self):  #try_exception
         """Lista todas as imagens que estão armazenadas"""
@@ -285,6 +278,7 @@ class Server(rpyc.Service):
                 print(k, v)
             print('---------------------------------------')
         except Exception as exception:
+            self.exposed_release_lock()
             raise exception
 
 
@@ -306,6 +300,7 @@ class Server(rpyc.Service):
             del self.cluster.index_table[image_name]
             return True
         except Exception as exception:
+            self.exposed_release_lock()
             raise exception
 
 
@@ -334,6 +329,7 @@ class Server(rpyc.Service):
         except KeyboardInterrupt:
             print("[KEYBOARD_INTERRUPT] Encerrando as threads.")
         except Exception as exception:
+            self.exposed_release_lock()
             raise exception
 
 
