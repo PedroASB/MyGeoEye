@@ -2,18 +2,18 @@ import rpyc, os, time, pika, json, psutil, threading
 from rpyc.utils.server import ThreadedServer
 
 # Data node
-INDEX = 1
+INDEX = 3
 PORT_DATA_NODE = 8000 + INDEX
-HOST_DATA_NODE = '192.168.40.111' # 'localhost'
+HOST_DATA_NODE = '192.168.40.120' # 'localhost'
 NAME_DATA_NODE = f'data_node_{INDEX}'
 
 # Serviço de nomes
-HOST_NAME_SERVICE = '192.168.40.223' # 'localhost'
+HOST_NAME_SERVICE = '192.168.40.38' # 'localhost'
 PORT_NAME_SERVICE = 6000
 
 # RabbitMQ
-RABBITMQ_HOST_MONITOR_STATUS = '192.168.40.244' # 'localhost'
-RABBITMQ_HOST_MONITOR_SCORE = '192.168.40.137' # 'localhost'
+RABBITMQ_HOST_MONITOR_STATUS = '192.168.40.106' # 'localhost'
+RABBITMQ_HOST_MONITOR_SCORE = '192.168.40.129' # 'localhost'
 
 # Tamanho de chunks / fragmentos
 CHUNK_SIZE = 65_536     # 64 KB
@@ -100,6 +100,7 @@ class DataNode(rpyc.Service):
         if not os.path.exists(self.STORAGE_DIR):
             os.makedirs(self.STORAGE_DIR)
         self.open_files = {}
+        self.lock = threading.Lock()
         self.pub_resources = PubResources()
         self.pub_status = PubStatus()
         self.host = host
@@ -121,8 +122,9 @@ class DataNode(rpyc.Service):
             image_shard_name = f'{image_name}%part{shard_index}%'
             image_path = os.path.join(self.STORAGE_DIR, image_shard_name)
             # Armazena o chunk recebido
-            with open(image_path, "ab") as file:
-                file.write(image_chunk)
+            with self.lock:
+                with open(image_path, "ab") as file:
+                    file.write(image_chunk)
         except Exception as exception:
             print('[ERRO] Erro em exposed_store_image_chunk')
             raise exception
@@ -136,13 +138,14 @@ class DataNode(rpyc.Service):
             image_shard_name = f'{image_name}%part{shard_index}%'
             image_path = os.path.join(self.STORAGE_DIR, image_shard_name)
             
-            # Verificar se o arquivo já está aberto ou não
-            if image_shard_name not in self.open_files:
-                if not os.path.exists(image_path):
-                    print(f"[ERRO] {image_name}%part{shard_index}% não encontrada.")
-                    return None
-                # Abrir o arquivo e armazenar no mapeamento
-                self.open_files[image_shard_name] = open(image_path, "rb")
+            with self.lock:
+                # Verificar se o arquivo já está aberto ou não
+                if image_shard_name not in self.open_files:
+                    if not os.path.exists(image_path):
+                        print(f"[ERRO] {image_name}%part{shard_index}% não encontrada.")
+                        return None
+                    # Abrir o arquivo e armazenar no mapeamento
+                    self.open_files[image_shard_name] = open(image_path, "rb")
 
             file = self.open_files[image_shard_name]
             image_chunk = file.read(CHUNK_SIZE)
@@ -173,8 +176,9 @@ class DataNode(rpyc.Service):
     def exposed_store_image_shard(self, image_shard_name, image_shard): #try_exception
         try:
             image_shard_path = os.path.join(self.STORAGE_DIR, image_shard_name)
-            with open(image_shard_path, "wb") as file:
-                file.write(image_shard)
+            with self.lock:
+                with open(image_shard_path, "wb") as file:
+                    file.write(image_shard)
         except Exception as exception:
             print('[ERRO] Erro em exposed_store_image_shard')
             raise exception
@@ -183,9 +187,10 @@ class DataNode(rpyc.Service):
     def exposed_retrieve_image_shard(self, image_shard_name): #try_exception
         try:
             image_shard_path = os.path.join(self.STORAGE_DIR, image_shard_name)
-            with open(image_shard_path, "rb") as file:
-                image_shard = file.read(SHARD_SIZE)
-            return image_shard
+            with self.lock:
+                with open(image_shard_path, "rb") as file:
+                    image_shard = file.read(SHARD_SIZE)
+                return image_shard
         except Exception as exception:
             print('[ERRO] Erro em exposed_retrieve_image_shard')
             raise exception

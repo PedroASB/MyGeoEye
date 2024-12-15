@@ -1,29 +1,9 @@
 import rpyc, time, pika, json, threading
 from copy import deepcopy
 
-RABBITMQ_HOST_MONITOR_SCORE = '192.168.40.137'
-RABBITMQ_HOST_MONITOR_STATUS = '192.168.40.244'
+RABBITMQ_HOST_MONITOR_SCORE = '192.168.40.129'
+RABBITMQ_HOST_MONITOR_STATUS = '192.168.40.106'
 BASE_SCORE = 42
-
-# class PubNodesServer:
-#     EXCHANGE_MONITOR_DATA_NODE_STATUS = 'exchange_monitor_data_node_status'
-#     QUEUE_MONITOR_DATA_NODE_STATUS = 'queue_monitor_data_node_status'
-
-#     def __init__(self, nodes_status, lock):
-#         self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
-#         self.channel = self.connection.channel()
-#         self.channel.exchange_declare(exchange=self.EXCHANGE_MONITOR_DATA_NODE_STATUS, exchange_type='fanout')
-#         self.channel.queue_declare(queue=self.QUEUE_MONITOR_DATA_NODE_STATUS)
-#         self.nodes_status = nodes_status
-#         self.lock = lock
-
-#     def notify_subs(self, changed_nodes):
-#         """Envia uma mensagem ao servidor notificando o status do Data Node."""
-#         message_dict = changed_nodes
-#         message_json = json.dumps(message_dict)
-#         self.channel.basic_publish(exchange='', routing_key=self.QUEUE_MONITOR_DATA_NODE_STATUS, body=message_json)
-#         print(f"[Monitor] Notificação enviada para {self.QUEUE_MONITOR_DATA_NODE_STATUS}: {message_json}")
-
 
 class SubScore:
     EXCHANGE_MONITOR_DATA_NODE_SCORES = 'exchange_monitor_data_node_scores'
@@ -121,6 +101,7 @@ class Cluster: #raise
         print('Data nodes:')
         print(self.data_nodes_addresses)
 
+
     def connect_cluster(self): #erase
         """Estabelece conexão com todos os data nodes"""
         for key, value in self.data_nodes.items():
@@ -157,11 +138,11 @@ class Cluster: #raise
             scored_nodes = [node_id for node_id in self.data_nodes if \
                             self.data_nodes[node_id]['online'] and \
                             None != self.data_nodes[node_id]['score'] >= BASE_SCORE]
-            scored_nodes.sort(key=lambda x: x[1], reverse=True)
-            storage_nodes = [node_id for node_id in scored_nodes]
-            if len(storage_nodes) < self.replication_factor:
-                storage_nodes = [node_id for node_id, _ in scored_nodes[:self.replication_factor]]
-            print(f'[INFO] Data nodes com score suficiente para armazenamento: {storage_nodes}')
+        scored_nodes.sort(key=lambda x: x[1], reverse=True)
+        storage_nodes = [node_id for node_id in scored_nodes]
+        if len(storage_nodes) < self.replication_factor:
+            storage_nodes = [node_id for node_id, _ in scored_nodes[:self.replication_factor]]
+        print(f'[INFO] Data nodes com score suficiente para armazenamento: {storage_nodes}')
         return storage_nodes
 
 
@@ -190,25 +171,28 @@ class Cluster: #raise
 
     def image_total_size(self, image_name): # raise
         total_size = 0
-        for shard in self.index_table[image_name]:
-            total_size += shard['size']
+        with self.lock:
+            for shard in self.index_table[image_name]:
+                total_size += shard['size']
         return total_size
 
 
     def init_update_index_table(self, image_name, image_size_division): # raise
-        # print('[INFO] Init da tabela de índices no cluster.')
-        if image_name in self.index_table:
-            return False
-        # img_01  ->  [[part_0: {'nodes': 3 2 4, 'size': 100}, ...]
-        self.index_table[image_name] = [{'nodes': [], 'size': None} \
-                                        for _ in range(image_size_division)]
+        with self.lock:
+            # print('[INFO] Init da tabela de índices no cluster.')
+            if image_name in self.index_table:
+                return False
+            # img_01  ->  [[part_0: {'nodes': 3 2 4, 'size': 100}, ...]
+            self.index_table[image_name] = [{'nodes': [], 'size': None} \
+                                            for _ in range(image_size_division)]
         return True
 
 
     def rollback_update_index_table(self, image_name): #raise
         # print('[INFO] Realizando rollback da tabela de índices.')
-        if image_name in self.index_table:
-            del self.index_table[image_name]
+        with self.lock:
+            if image_name in self.index_table:
+                del self.index_table[image_name]
 
 
     def update_index_table(self, image_name, shard_index, shard_size, nodes_id): # raise

@@ -6,13 +6,15 @@ import concurrent.futures
 # from addresses import *
 
 
+global_lock = threading.Lock()
+
 # Servidor
 NAME_SERVER = 'geoeye_images'
-HOST_SERVER = '192.168.40.117' # 'localhost'
+HOST_SERVER = '192.168.40.30' # 'localhost'
 PORT_SERVER = 5000
 
 # Serviço de nomes
-HOST_NAME_SERVICE = '192.168.40.223' # 'localhost'
+HOST_NAME_SERVICE = '192.168.40.38' # 'localhost'
 PORT_NAME_SERVICE = 6000
 
 # Tamanho de chunks / fragmentos
@@ -21,8 +23,8 @@ SHARD_SIZE = 2_097_152  # 2 MB
 
 
 # DATA_NODES_ADDR = [DATA_NODE_1_ADDR, DATA_NODE_2_ADDR, DATA_NODE_3_ADDR, DATA_NODE_4_ADDR]
-CLUSTER_SIZE = 1 # Quantidade total de data nodes
-REPLICATION_FACTOR = 1 # Fator de réplica
+CLUSTER_SIZE = 4 # Quantidade total de data nodes
+REPLICATION_FACTOR = 2 # Fator de réplica
 
 
 # TODO: criar uma classe "buffer" para armazenar variáveis 'current'
@@ -61,6 +63,17 @@ class Server(rpyc.Service):
         print(f"[STATUS] Cliente desconectado: '{client_host}'")
 
 
+    def exposed_acquire_lock(self):
+        print("Cliente pediu o lock.")
+        global_lock.acquire()
+        print("Lock adquirido pelo cliente.")
+        return "Lock adquirido. Você pode fazer seu trabalho agora."
+        
+    def exposed_release_lock(self):
+        global_lock.release()
+        print("Lock liberado pelo cliente.")
+        return "Lock liberado."
+    
     def exposed_init_upload_image_chunk(self, image_name, image_size): #try_exception
         try:
             self.current_image_name = image_name
